@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Meeting Notes</title>
+<style>
+  :root{
+    --bg:#f6f6f7; --panel:#fff; --ink:#1c1c1e; --dim:#6e6e73; --line:#e3e3e6;
+    --accent:#0a84ff; --ok:#30a46c; --warn:#d97706; --bad:#e5484d;
+    --radius:8px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --bg:#1c1c1e; --panel:#2c2c2e; --ink:#f2f2f7; --dim:#98989d;
+           --line:#3a3a3c; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:13px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;}
+  button{font:inherit;color:inherit;cursor:pointer;border:1px solid var(--line);
+    background:var(--panel);border-radius:6px;padding:5px 11px;}
+  button:hover{border-color:var(--dim)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:590}
+  button.primary:hover{filter:brightness(1.08)}
+  button.link{border:0;background:0;color:var(--accent);padding:2px 4px}
+  button:disabled{opacity:.45;cursor:default}
+  input,textarea,select{font:inherit;color:inherit;background:var(--panel);
+    border:1px solid var(--line);border-radius:6px;padding:6px 8px;width:100%;}
+  textarea{resize:vertical;line-height:1.55}
+  input:focus,textarea:focus,select:focus{outline:2px solid var(--accent);outline-offset:-1px;border-color:transparent}
+  label{display:block;font-size:11px;font-weight:590;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--dim);margin:0 0 5px}
+
+  /* ---------- chrome ---------- */
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px;
+    background:var(--panel);border-bottom:1px solid var(--line);
+    position:sticky;top:0;z-index:5;flex-wrap:wrap;}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);
+    white-space:nowrap}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--bad);flex:none}
+  .dot.on{background:var(--ok)}
+  .spacer{flex:1}
+  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer}
+  .switch input{width:auto;margin:0}
+
+  main{display:grid;grid-template-columns:230px 1fr;gap:0;align-items:start}
+  @media (max-width:720px){ main{grid-template-columns:1fr} aside{border-right:0!important} }
+
+  aside{border-right:1px solid var(--line);padding:14px 12px;min-height:calc(100vh - 44px)}
+  aside h2{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);
+    margin:0 0 7px;font-weight:590}
+  aside h2:not(:first-child){margin-top:20px}
+  .row{display:block;width:100%;text-align:left;border:0;background:0;padding:6px 8px;
+    border-radius:6px;line-height:1.35}
+  .row:hover{background:var(--panel)}
+  .row.active{background:var(--accent);color:#fff}
+  .row.active small{color:rgba(255,255,255,.8)}
+  .row small{display:block;color:var(--dim);font-size:11px}
+  .empty{color:var(--dim);font-size:12px;padding:4px 8px}
+
+  section.pane{padding:18px 20px 40px;max-width:760px}
+  .grid2{display:grid;grid-template-columns:1fr 150px;gap:12px}
+  .field{margin-bottom:14px}
+  .items{display:flex;flex-direction:column;gap:6px}
+  .item{display:grid;grid-template-columns:150px 1fr 130px 26px;gap:6px;align-items:start}
+  @media (max-width:720px){ .item{grid-template-columns:1fr} .grid2{grid-template-columns:1fr} }
+  .x{border:0;background:0;color:var(--dim);padding:6px 0}
+  .x:hover{color:var(--bad)}
+  details{border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px;
+    background:var(--panel);margin-bottom:14px}
+  summary{cursor:pointer;font-weight:590;font-size:12px}
+  .assumption{border-top:1px solid var(--line);padding-top:10px;margin-top:10px}
+  .quote{color:var(--dim);font-style:italic;margin-top:5px;font-size:12px}
+  .bar{position:sticky;bottom:0;background:var(--panel);border-top:1px solid var(--line);
+    padding:10px 20px;display:flex;gap:9px;align-items:center;margin:0 -20px -40px;
+    padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
+  .note{font-size:12px;color:var(--dim)}
+  .note.ok{color:var(--ok)} .note.bad{color:var(--bad)}
+  .banner{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
+    border-radius:var(--radius);padding:10px 12px;margin-bottom:14px;font-size:12px;
+    display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  #alert:not(:empty){padding:12px 16px 0}
+  #alert .banner{margin:0}
+  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+    background:var(--bg);padding:2px 5px;border-radius:4px}
+  progress{width:100%;height:5px;margin-top:8px}
+  dialog{border:0;border-radius:12px;padding:0;background:var(--panel);color:var(--ink);
+    box-shadow:0 20px 60px rgba(0,0,0,.35);max-width:440px;width:92vw}
+  dialog::backdrop{background:rgba(0,0,0,.35)}
+  .dlg-body{padding:18px 20px}
+  .dlg-foot{padding:12px 20px;border-top:1px solid var(--line);display:flex;
+    justify-content:flex-end;gap:9px}
+  .path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+    color:var(--dim);word-break:break-all}
+</style>
+</head>
+<body>
+
+<header>
+  <span class="chip"><span class="dot" id="d-ollama"></span><span id="t-ollama">…</span></span>
+  <span class="chip" id="t-model">—</span>
+  <span class="chip" id="t-folder">—</span>
+  <span class="spacer"></span>
+  <label class="switch"><input type="checkbox" id="watch"> Watch folder</label>
+  <button onclick="openSettings()">Settings</button>
+</header>
+
+<div id="alert"></div>
+
+<main>
+  <aside>
+    <h2>Inbox</h2>
+    <div id="files"></div>
+    <h2>Recent notes</h2>
+    <div id="history"></div>
+  </aside>
+
+  <section class="pane" id="pane">
+    <p class="empty">Pick a transcript on the left, or drop one into the watched folder.</p>
+  </section>
+</main>
+
+<dialog id="settings">
+  <div class="dlg-body">
+    <div class="field">
+      <label>Transcript folder</label>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="path" id="s-folder"></span>
+        <button onclick="chooseFolder()" style="flex:none">Change…</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Model</label>
+      <select id="s-model"></select>
+    </div>
+    <div class="field">
+      <label>Delivery</label>
+      <select id="s-mail">
+        <option value="outlook_draft">Draft in Outlook — nothing is sent</option>
+        <option value="smtp">Send over SMTP</option>
+      </select>
+    </div>
+    <div class="field" style="margin-bottom:0">
+      <label>Default recipients</label>
+      <textarea id="s-recipients" rows="3"
+        placeholder="one per line — address, or Name &lt;address&gt;"></textarea>
+    </div>
+  </div>
+  <div class="dlg-foot">
+    <button onclick="settings.close()">Cancel</button>
+    <button class="primary" onclick="saveSettings()">Save</button>
+  </div>
+</dialog>
+
+<script>
+const TOKEN = "__TOKEN__";
+let STATE = null, NOTES = null, NOTES_PATH = null, POLL = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+async function api(path, body){
+  const r = await fetch(path, {
+    method: body ? "POST" : "GET",
+    headers: {"X-Token": TOKEN, "Content-Type": "application/json"},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return r.json();
+}
+
+// ---------------------------------------------------------------- state
+
+async function refresh(){
+  STATE = await api("/api/state");
+  $("d-ollama").className = "dot" + (STATE.ollama ? " on" : "");
+  $("t-ollama").textContent = STATE.ollama ? "Ollama running" : "Ollama not responding";
+  $("t-model").textContent = STATE.model + (STATE.model_ready ? "" : " · not downloaded");
+  $("t-folder").textContent = STATE.folder.replace(/^\/Users\/[^/]+/, "~");
+  $("watch").checked = STATE.watching;
+
+  $("alert").innerHTML = STATE.ollama ? "" : (STATE.ollama_installed
+    ? `<div class="banner"><span>Ollama is not running.</span>
+         <button onclick="startOllama(this)">Start it</button></div>`
+    : `<div class="banner"><span>Ollama is not installed — it is the local model
+         runner this app needs. Install it from <b>ollama.com</b>, or in a terminal:
+         <code>brew install ollama</code></span></div>`);
+
+  $("files").innerHTML = STATE.files.length ? STATE.files.map(f =>
+    `<button class="row" onclick="processFile(${JSON.stringify(f.path)})">
+       ${esc(f.name)}<small>${esc(f.modified)}</small></button>`).join("")
+    : `<p class="empty">Nothing new in the folder</p>`;
+
+  $("history").innerHTML = STATE.history.length ? STATE.history.map(h =>
+    `<button class="row ${h.path===NOTES_PATH?"active":""}"
+       onclick="openNotes(${JSON.stringify(h.path)})">
+       ${esc(h.title)}<small>${esc(h.date || h.modified)}</small></button>`).join("")
+    : `<p class="empty">No meetings yet</p>`;
+}
+
+// ---------------------------------------------------------------- jobs
+
+async function processFile(path){
+  const r = await api("/api/process", {path});
+  if (!r.ok) return alert(r.error);
+  watchJob();
+}
+
+function watchJob(){
+  clearInterval(POLL);
+  POLL = setInterval(async () => {
+    const j = await api("/api/job");
+    if (j.active){
+      const label = j.stage === "pull"
+        ? `Downloading ${j.i} / ${j.n} MB`
+        : (j.stage === "map" ? `Reading part ${j.i} of ${j.n}` : "Writing the notes");
+      $("pane").innerHTML =
+        `<h3>${esc(j.file || STATE.model)}</h3>
+         <p class="note">${esc(label)}</p>
+         <progress ${j.n ? `value="${j.i}" max="${j.n}"` : ""}></progress>
+         <p class="note">A fifteen minute meeting takes a couple of minutes.</p>`;
+      return;
+    }
+    clearInterval(POLL);
+    await refresh();
+    if (j.error) $("pane").innerHTML = `<p class="note bad">${esc(j.error)}</p>`;
+    else if (j.result) openNotes(j.result);
+    else $("pane").innerHTML = `<p class="note ok">${esc(j.note || "Done")}</p>`;
+  }, 700);
+}
+
+// ---------------------------------------------------------------- editor
+
+async function openNotes(path){
+  NOTES_PATH = path;
+  NOTES = await api("/api/notes?path=" + encodeURIComponent(path));
+  renderNotes();
+  refresh();
+}
+
+function lines(a){ return (a || []).join("\n"); }
+
+function renderNotes(){
+  const d = NOTES;
+  const rec = (STATE.recipients || []).join("\n");
+  $("pane").innerHTML = `
+    ${STATE.model_ready ? "" : `<div class="banner">
+      <span>Model <b>${esc(STATE.model)}</b> is not downloaded.</span>
+      <button onclick="pullModel()">Download</button></div>`}
+
+    <div class="grid2">
+      <div class="field"><label>Title</label>
+        <input id="f-title" value="${esc(d.title)}"></div>
+      <div class="field"><label>Date</label>
+        <input id="f-date" value="${esc(d.date)}"></div>
+    </div>
+    <div class="field"><label>Participants</label>
+      <input id="f-participants" value="${esc((d.participants||[]).join(', '))}"></div>
+    <div class="field"><label>Summary</label>
+      <textarea id="f-summary" rows="7">${esc(d.summary)}</textarea></div>
+    <div class="field"><label>Decisions — one per line</label>
+      <textarea id="f-decisions" rows="4">${esc(lines(d.decisions))}</textarea></div>
+
+    <div class="field"><label>Action items</label>
+      <div class="items" id="f-actions"></div>
+      <button class="link" onclick="addAction()">+ add</button></div>
+
+    <div class="field"><label>Open questions — one per line</label>
+      <textarea id="f-questions" rows="3">${esc(lines(d.open_questions))}</textarea></div>
+
+    <details><summary>Assumptions the model made (${(d.assumptions||[]).length})</summary>
+      <p class="note">Nothing here was said outright. Check the quote before relying on it.</p>
+      <div id="f-assumptions"></div></details>
+
+    <div class="field"><label>Recipients — one per line</label>
+      <textarea id="f-recipients" rows="3">${esc(rec)}</textarea></div>
+
+    <div class="bar">
+      <button onclick="saveNotes()">Save</button>
+      <button class="primary" onclick="send()">${
+        STATE.mail_mode === "smtp" ? "Send over SMTP" : "Create draft in Outlook"}</button>
+      <span class="note" id="status"></span>
+    </div>`;
+  renderActions();
+  renderAssumptions();
+}
+
+function renderActions(){
+  $("f-actions").innerHTML = (NOTES.action_items || []).map((a, i) => `
+    <div class="item">
+      <input value="${esc(a.owner)}" placeholder="owner" oninput="NOTES.action_items[${i}].owner=this.value">
+      <input value="${esc(a.task)}" placeholder="task" oninput="NOTES.action_items[${i}].task=this.value">
+      <input value="${esc(a.deadline || '')}" placeholder="due" oninput="NOTES.action_items[${i}].deadline=this.value||null">
+      <button class="x" onclick="NOTES.action_items.splice(${i},1);renderActions()">✕</button>
+    </div>`).join("");
+}
+function addAction(){
+  (NOTES.action_items = NOTES.action_items || []).push({owner:"",task:"",deadline:null});
+  renderActions();
+}
+
+function renderAssumptions(){
+  $("f-assumptions").innerHTML = (NOTES.assumptions || []).map((s, i) => `
+    <div class="assumption">
+      <div class="item" style="grid-template-columns:1fr 110px 26px">
+        <input value="${esc(s.statement)}" oninput="NOTES.assumptions[${i}].statement=this.value">
+        <select onchange="NOTES.assumptions[${i}].confidence=this.value">
+          ${["low","medium","high"].map(l =>
+            `<option ${s.confidence===l?"selected":""}>${l}</option>`).join("")}
+        </select>
+        <button class="x" onclick="NOTES.assumptions.splice(${i},1);renderAssumptions()">✕</button>
+      </div>
+      <div class="quote">“${esc(s.evidence_quote)}”</div>
+    </div>`).join("") || `<p class="note">None — nothing was inferred.</p>`;
+}
+
+function collect(){
+  const split = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
+  NOTES.title = $("f-title").value;
+  NOTES.date = $("f-date").value;
+  NOTES.participants = $("f-participants").value.split(",").map(s => s.trim()).filter(Boolean);
+  NOTES.summary = $("f-summary").value;
+  NOTES.decisions = split("f-decisions");
+  NOTES.open_questions = split("f-questions");
+  return NOTES;
+}
+
+function say(msg, cls){ const el = $("status"); if(el){ el.textContent = msg; el.className = "note " + (cls||""); } }
+
+async function saveNotes(){
+  await api("/api/notes", {path: NOTES_PATH, data: collect()});
+  say("Saved", "ok");
+  refresh();
+}
+
+async function send(){
+  const rec = $("f-recipients").value.split("\n").map(s => s.trim()).filter(Boolean);
+  say("Working…");
+  await api("/api/notes", {path: NOTES_PATH, data: collect()});
+  const r = await api("/api/send", {data: NOTES, recipients: rec});
+  say(r.ok ? r.message : r.error, r.ok ? "ok" : "bad");
+}
+
+async function startOllama(btn){
+  btn.disabled = true; btn.textContent = "Starting…";
+  const r = await api("/api/ollama", {});
+  if (!r.ok){ btn.disabled = false; btn.textContent = "Start it";
+              alert("Could not start Ollama. Is it installed?"); return; }
+  refresh();
+}
+
+async function pullModel(){
+  await api("/api/pull", {model: STATE.model});
+  watchJob();
+}
+
+// ---------------------------------------------------------------- settings
+
+function openSettings(){
+  $("s-folder").textContent = STATE.folder;
+  $("s-model").innerHTML = STATE.models.map(m =>
+    `<option ${m===STATE.model?"selected":""}>${esc(m)}</option>`).join("");
+  $("s-mail").value = STATE.mail_mode;
+  $("s-recipients").value = (STATE.recipients || []).join("\n");
+  settings.showModal();
+}
+
+async function chooseFolder(){
+  const r = await api("/api/choose", {kind: "folder"});
+  if (r.path) $("s-folder").textContent = r.path.replace(/\/$/, "");
+}
+
+async function saveSettings(){
+  await api("/api/settings", {
+    INBOX_DIR: $("s-folder").textContent,
+    OLLAMA_MODEL: $("s-model").value,
+    MAIL_MODE: $("s-mail").value,
+    RECIPIENTS: $("s-recipients").value.split("\n").map(s => s.trim()).filter(Boolean).join(", "),
+  });
+  settings.close();
+  refresh();
+}
+
+$("watch").addEventListener("change", async e => {
+  await api("/api/settings", {WATCH_ENABLED: e.target.checked ? "1" : "0"});
+  refresh();
+});
+
+(async () => {
+  await refresh();
+  const wanted = new URLSearchParams(location.search).get("open");
+  if (wanted) openNotes(wanted);
+})();
+setInterval(() => { if (!POLL) refresh(); }, 5000);
+</script>
+</body>
+</html>

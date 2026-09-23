@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f5f5f4;">
+<div style="max-width:680px;margin:0 auto;padding:24px;background:#ffffff;
+            font:15px/1.6 -apple-system,'Helvetica Neue',Arial,sans-serif;color:#1c1917;">
+
+  <h1 style="margin:0 0 4px;font-size:21px;line-height:1.3;">{{ title }}</h1>
+  <p style="margin:0 0 20px;color:#78716c;font-size:13px;">
+    {{ date }}{% if participants %} &middot; {{ participants|join(', ') }}{% endif %}
+  </p>
+
+  <p style="margin:0 0 24px;">{{ summary }}</p>
+
+  {% if decisions %}
+  <h2 style="font-size:15px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#57534e;">Decisions</h2>
+  <ul style="margin:0 0 24px;padding-left:20px;">
+    {% for d in decisions %}<li style="margin-bottom:6px;">{{ d }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if action_items %}
+  <h2 style="font-size:15px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#57534e;">Action items</h2>
+  <table style="width:100%;border-collapse:collapse;margin:0 0 24px;font-size:14px;">
+    <tr style="text-align:left;color:#78716c;">
+      <th style="padding:6px 8px;border-bottom:1px solid #e7e5e4;">Owner</th>
+      <th style="padding:6px 8px;border-bottom:1px solid #e7e5e4;">Task</th>
+      <th style="padding:6px 8px;border-bottom:1px solid #e7e5e4;">Due</th>
+    </tr>
+    {% for a in action_items %}
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid #f5f5f4;vertical-align:top;white-space:nowrap;">{{ a.owner }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f5f5f4;vertical-align:top;">{{ a.task }}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid #f5f5f4;vertical-align:top;white-space:nowrap;">{{ a.deadline or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endif %}
+
+  {% if open_questions %}
+  <h2 style="font-size:15px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#57534e;">Open questions</h2>
+  <ul style="margin:0 0 24px;padding-left:20px;">
+    {% for q in open_questions %}<li style="margin-bottom:6px;">{{ q }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if assumptions %}
+  <h2 style="font-size:15px;margin:0 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#57534e;">Assumptions</h2>
+  <p style="margin:0 0 8px;color:#78716c;font-size:13px;">Not said outright — check before relying on it.</p>
+  <ul style="margin:0 0 24px;padding-left:20px;">
+    {% for s in assumptions %}
+    <li style="margin-bottom:10px;">
+      {{ s.statement }}
+      <span style="color:#78716c;font-size:12px;">({{ s.confidence }})</span><br>
+      <span style="color:#78716c;font-size:13px;font-style:italic;">«{{ s.evidence_quote }}»</span>
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  <p style="margin:24px 0 0;padding-top:12px;border-top:1px solid #e7e5e4;color:#a8a29e;font-size:12px;">
+    Drafted locally from the meeting transcript. Please review before sending.
+  </p>
+</div>
+</body>
+</html>

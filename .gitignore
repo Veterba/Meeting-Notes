@@ -1,0 +1,20 @@
+# virtualenv and build output
+.venv/
+build/
+dist/
+__pycache__/
+*.pyc
+
+# generated icons (build.sh redraws them)
+assets/AppIcon.icns
+assets/AppIcon.iconset/
+
+# local settings and user data — never commit these
+.env
+logs/
+inbox/
+processed/
+failed/
+
+# macOS
+.DS_Store

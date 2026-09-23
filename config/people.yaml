@@ -1,0 +1,8 @@
+# Name as it appears in the Teams transcript -> email address.
+# Matching is case insensitive, and a surname on its own is enough.
+# The right-hand side takes a bare address or "Name <address>"; with a bare
+# address the display name is taken from the key.
+people:
+  Ivan Petrov: ivan.petrov@example.com
+  Maria Sokolova: "Maria Sokolova (analytics) <maria.sokolova@example.com>"
+  Alexey Gromov: alexey.gromov@example.com
