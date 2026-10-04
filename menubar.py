@@ -14,7 +14,6 @@ import rumps
 from dotenv import load_dotenv, set_key
 
 import llm
-import mailer
 import main as pipeline
 
 from paths import CODE, DATA, ENV_FILE

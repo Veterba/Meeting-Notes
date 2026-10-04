@@ -1,0 +1,15 @@
+# Only the checks the project actually runs: pytest for the parser suite, ruff
+# for lint. No formatter — the code is hand-wrapped and ruff format would undo it.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The modules under test sit in the repo root, next to tests/.
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes. Nothing that rewrites working code.
+select = ["E", "W", "F"]

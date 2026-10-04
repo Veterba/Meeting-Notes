@@ -87,6 +87,15 @@ For hacking on it, skip the build:
 Same setup steps, but it runs `menubar.py` straight from the working tree, so the
 data folders stay inside the repo instead of Application Support.
 
+The checks live behind `requirements-dev.txt` — pytest and ruff, which the app
+itself does not need:
+
+```bash
+.venv/bin/python -m pip install -r requirements-dev.txt
+.venv/bin/python -m pytest -q       # the fixture suite
+.venv/bin/ruff check .              # lint
+```
+
 <details>
 <summary>The pieces on their own, for debugging</summary>
 
@@ -96,7 +105,7 @@ source .venv/bin/activate
 python main.py                                  # just the watcher, no icon
 python main.py --once ~/Downloads/x.vtt         # one file, JSON to stdout
 python main.py --parse-only ~/Downloads/x.vtt   # parse only, never calls the model
-python test_parser.py                           # the fixture suite
+python -m pytest -q                             # the fixture suite
 
 python main.py --parse-only examples/sample-meeting-ru.vtt   # try the sample
 python main.py --once      examples/sample-meeting-ru.vtt
@@ -255,7 +264,7 @@ and diff the result over the same transcript.
 ## Tests
 
 ```bash
-python test_parser.py
+.venv/bin/python -m pytest -q
 ```
 
 Twelve fixtures. Eight that must be accepted: classic Teams VTT with GUID cue
@@ -264,7 +273,7 @@ identifiers, VTT without the closing `</v>`, VTT with an `X-TIMESTAMP-MAP` and
 `Name: text`, and `.docx` with tab and with space separators. Four that must be
 rejected: film subtitles, a report, a meeting agenda and plain prose.
 
-If a transcript ever parses wrong, add its shape to `test_parser.py` and fix the
+If a transcript ever parses wrong, add its shape to `tests/test_parser.py` and fix the
 regexes in `parser.py` until the suite is green again.
 
 ## When something breaks
@@ -348,7 +357,8 @@ assets/     make_icon.py          icons, drawn at build time
 examples/                         a sample transcript and its notes
 build.sh    setup.py              produces Meeting Notes.app
 run.sh                            run from source, no build
-test_parser.py                    the fixture suite
+tests/                            the fixture suite (pytest)
+requirements-dev.txt  pyproject.toml   pytest and ruff, and their settings
 ```
 
 Not committed: `.env`, `logs/`, `inbox/`, `processed/`, `failed/`, `.venv/`,

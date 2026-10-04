@@ -252,7 +252,9 @@ def generate_json(prompt: str, schema: dict, model: str) -> dict:
         except Exception as e:
             last_err = e
             payload["options"]["temperature"] = 0.0
-            payload["prompt"] = prompt + "\n\nReturn ONLY valid JSON matching the schema, no prose.\n/no_think"
+            payload["prompt"] = (
+                prompt + "\n\nReturn ONLY valid JSON matching the schema, "
+                "no prose.\n/no_think")
     raise ValueError(f"model returned no valid JSON after 2 attempts: {last_err}")
 
 

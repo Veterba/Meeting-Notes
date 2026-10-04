@@ -5,7 +5,6 @@ import subprocess
 import tempfile
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
-from pathlib import Path
 
 import yaml
 from dotenv import load_dotenv

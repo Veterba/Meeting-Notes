@@ -5,6 +5,10 @@ dist/
 __pycache__/
 *.pyc
 
+# tool caches
+.pytest_cache/
+.ruff_cache/
+
 # generated icons (build.sh redraws them)
 assets/AppIcon.icns
 assets/AppIcon.iconset/
