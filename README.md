@@ -134,11 +134,11 @@ pick it up.
 ## How the app is put together
 
 ```
-menubar.py   the status bar item, the watcher thread, the owner of everything
+menubar.py   the status bar item, the owner of everything
  ├ server.py  a loopback HTTP API on a random port, gated by a startup token
  ├ window.py  an NSWindow with a WKWebView pointed at that API
  └ ui/        the page itself — plain HTML and JavaScript, no framework
-main.py      watcher and CLI          parser.py  .vtt/.docx into speaker turns
+main.py      watcher, queue and CLI   parser.py  .vtt/.docx into speaker turns
 llm.py       Ollama, map-reduce       mailer.py  Jinja2, Outlook, SMTP
 ```
 
@@ -154,7 +154,9 @@ is where the real work happens.
 - **status** — whether Ollama is up, which model is selected and whether it is
   downloaded, which folder is being watched;
 - **Open Meeting Notes** (⌘O) — the window: notes editor and settings;
-- **Process a file…** — pick a transcript by hand, bypassing the folder;
+- **Process a file…** — pick a transcript by hand, bypassing the folder. It
+  joins the same queue as anything the watcher finds, so it waits its turn
+  instead of being refused while another meeting is being summarised;
 - **Watch the folder** — the on/off switch. Off stops the watcher outright and
   the icon turns into the same page with a line struck through it, so the menu
   bar says at a glance whether anything is running;
@@ -350,7 +352,7 @@ Rebuilding is safe: user data lives in Application Support, not in the bundle.
 
 ```
 menubar.py  server.py  window.py  ui/     the app: icon, API, window, page
-main.py     parser.py  llm.py     mailer.py   the pipeline
+main.py     parser.py  llm.py     mailer.py   the pipeline, watcher and queue
 paths.py                          code vs. user data
 prompts/    templates/ config/    the bits you are meant to edit
 assets/     make_icon.py          icons, drawn at build time

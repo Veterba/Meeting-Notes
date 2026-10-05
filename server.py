@@ -25,11 +25,6 @@ UI_DIR = CODE / "ui"
 
 TOKEN = secrets.token_urlsafe(24)
 
-# One job at a time: the model saturates the machine anyway.
-JOB = {"active": False, "stage": "", "i": 0, "n": 0, "file": "", "error": "",
-       "result": None, "note": ""}
-_job_lock = threading.Lock()
-
 # Set by the menu bar app so settings changes restart the watcher.
 on_settings_changed = None
 
@@ -85,39 +80,10 @@ def state() -> dict:
         "files": files[:25],
         "history": history,
         "num_ctx": llm.NUM_CTX,
+        # Whatever the one worker is doing, whoever started it — so the window
+        # shows a file the watcher picked up as well as one chosen here.
+        "job": pipeline.WORKER.snapshot(),
     }
-
-
-def _run_job(path: Path, kind="process"):
-    def progress(stage, i, n):
-        JOB.update(stage=stage, i=i, n=n)
-
-    try:
-        if kind == "pull":
-            def on_pull(status, done, total):
-                JOB.update(stage="pull", i=done // 1048576, n=(total or 1) // 1048576,
-                           note=status)
-            llm.pull_model(str(path), on_pull)
-            JOB.update(result=None, note="model downloaded")
-        else:
-            # Chosen by hand, so the transcript check is skipped on purpose.
-            out = pipeline.process_file(Path(path), model=os.getenv("OLLAMA_MODEL") or None,
-                                        progress_cb=progress, move=False)
-            JOB["result"] = str(out)
-    except Exception as e:
-        JOB["error"] = str(e)
-    finally:
-        JOB["active"] = False
-
-
-def start_job(target, kind="process") -> dict:
-    with _job_lock:
-        if JOB["active"]:
-            return {"ok": False, "error": "already busy"}
-        JOB.update(active=True, stage="starting", i=0, n=0, error="", result=None,
-                   note="", file=Path(str(target)).name)
-    threading.Thread(target=_run_job, args=(target, kind), daemon=True).start()
-    return {"ok": True}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -169,7 +135,7 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/api/state":
             return self._json(state())
         if u.path == "/api/job":
-            return self._json(JOB)
+            return self._json(pipeline.WORKER.snapshot())
         if u.path == "/api/notes":
             p = Path(q["path"][0])
             return self._json(json.loads(p.read_text(encoding="utf-8")))
@@ -185,13 +151,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": f"bad request: {e}"}, 400)
 
         if u.path == "/api/process":
-            return self._json(start_job(Path(body["path"])))
+            # Chosen by hand, so the transcript check is skipped on purpose and
+            # the file stays where it is. Queued if the worker is busy.
+            return self._json(pipeline.WORKER.submit(body["path"]))
 
         if u.path == "/api/ollama":
             return self._json({"ok": llm.start_ollama(), "state": state()})
 
         if u.path == "/api/pull":
-            return self._json(start_job(body["model"], kind="pull"))
+            return self._json(pipeline.WORKER.submit(body["model"], kind="pull"))
 
         if u.path == "/api/notes":
             p = Path(body["path"])

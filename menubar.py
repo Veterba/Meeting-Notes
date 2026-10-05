@@ -12,6 +12,7 @@ from pathlib import Path
 
 import rumps
 from dotenv import load_dotenv, set_key
+from PyObjCTools import AppHelper
 
 import llm
 import main as pipeline
@@ -22,6 +23,20 @@ BASE = CODE
 ENV = ENV_FILE
 ICON = CODE / "assets" / "icon.png"
 ICON_PAUSED = CODE / "assets" / "icon-paused.png"
+
+
+def on_main(fn, *args):
+    """Run fn on the main thread.
+
+    The menu, the icon and the notifications are all AppKit, and AppKit from a
+    background thread freezes or crashes the app. Callbacks arrive here from the
+    worker thread, the watcher thread and the HTTP handler threads, so every one
+    of them goes through this and nothing else touches the UI.
+    """
+    if threading.current_thread() is threading.main_thread():
+        fn(*args)
+    else:
+        AppHelper.callAfter(fn, *args)
 
 
 def env_flag(key: str, default: bool = True) -> bool:
@@ -61,13 +76,12 @@ def short_path(p) -> str:
 class TranscriptApp(rumps.App):
     def __init__(self):
         super().__init__("Meeting Notes", icon=str(ICON), template=True, quit_button=None)
-        self.stop_event = None
-        self.worker = None
+        self.watcher = None
         self.enabled = env_flag("WATCH_ENABLED")
+        pipeline.WORKER.on_event = self.on_job_event
 
         import server
         import window
-        self.server_mod = server
         url, _token, self.httpd = server.serve()
         self.window = window.AppWindow(url)
         server.on_settings_changed = self.on_settings_changed
@@ -134,24 +148,23 @@ class TranscriptApp(rumps.App):
         if llm.start_ollama():
             pipeline.log.info("Started Ollama")
         else:
-            notify("Ollama is not installed",
-                   "Install it with: brew install ollama")
-        self.refresh(None)
+            on_main(notify, "Ollama is not installed",
+                    "Install it with: brew install ollama")
+        on_main(self.refresh, None)
 
     # ------------------------------------------------------------ watcher
 
     def apply_watch_state(self):
-        """Stop whatever is running, then start again only if watching is on.
+        """Match the running watcher to the settings. Main thread only.
 
-        Also called after the folder or the model changes, so the running watcher
-        always matches the settings.
+        Returns in milliseconds: the watcher only detects files, so stopping it
+        never waits for anything. A transcript already being summarised is left
+        alone and finishes even if watching is switched off underneath it — the
+        worker does not belong to the watcher.
         """
-        if self.stop_event:
-            self.stop_event.set()
-        if self.worker:
-            self.worker.join(timeout=5)   # let the observer release the folder
-        self.stop_event = None
-        self.worker = None
+        if self.watcher:
+            self.watcher.stop()
+            self.watcher = None
 
         self.toggle.state = 1 if self.enabled else 0
         self.icon = str(ICON if self.enabled else ICON_PAUSED)
@@ -161,16 +174,10 @@ class TranscriptApp(rumps.App):
             pipeline.log.info("Watching paused")
             return
 
-        self.stop_event = threading.Event()
         inbox = Path(os.getenv("INBOX_DIR", DATA / "inbox")).expanduser().resolve()
         pipeline.INBOX_DIR = inbox
-        self.worker = threading.Thread(
-            target=pipeline.watch,
-            kwargs={"inbox": inbox, "model": os.getenv("OLLAMA_MODEL") or None,
-                    "on_done": self.on_done, "on_error": self.on_error,
-                    "on_skip": self.on_skip, "stop_event": self.stop_event},
-            daemon=True)
-        self.worker.start()
+        self.watcher = pipeline.Watcher(inbox)
+        self.watcher.start()
 
     def toggle_watching(self, _):
         self.enabled = not self.enabled
@@ -179,27 +186,37 @@ class TranscriptApp(rumps.App):
         self.refresh(None)
 
     def on_settings_changed(self, changed: dict):
-        """The window saved settings; bring this process in line with them."""
+        """The window saved settings (on an HTTP thread); come into line."""
+        on_main(self._settings_changed, changed)
+
+    def _settings_changed(self, changed: dict):
         if "WATCH_ENABLED" in changed:
             self.enabled = env_flag("WATCH_ENABLED")
         self.apply_watch_state()
         self.refresh(None)
 
-    def on_done(self, src, out):
-        try:
-            title = json.loads(Path(out).read_text(encoding="utf-8")).get("title", out.stem)
-        except Exception:
-            title = Path(out).stem
-        notify("Notes ready", f"{title} — click the icon to review and send")
-        self.rebuild_history()
+    # ------------------------------------------------------------ jobs
 
-    def on_error(self, src, exc):
-        notify("Could not process", f"{Path(src).name}: {exc}")
+    def on_job_event(self, kind, target, payload):
+        """The worker finished something, on the worker thread."""
+        on_main(self._job_event, kind, target, payload)
 
-    def on_skip(self, src, exc):
-        # Not a transcript, just a file sharing the folder. Log only — a
-        # notification per downloaded document would be noise.
-        pipeline.log.info("Ignored %s: %s", Path(src).name, exc)
+    def _job_event(self, kind, target, payload):
+        name = Path(str(target)).name
+        if kind == "done":
+            out = Path(payload)
+            try:
+                title = json.loads(out.read_text(encoding="utf-8")).get("title", out.stem)
+            except Exception:
+                title = out.stem
+            notify("Notes ready", f"{title} — click the icon to review and send")
+            self.rebuild_history()
+        elif kind == "error":
+            notify("Could not process", f"{name}: {payload}")
+        elif kind == "skip":
+            # Not a transcript, just a file sharing the folder. Log only — a
+            # notification per downloaded document would be noise.
+            pipeline.log.info("Ignored %s: %s", name, payload)
 
     # ------------------------------------------------------------ actions
 
@@ -214,12 +231,14 @@ class TranscriptApp(rumps.App):
                    'of type {"vtt", "docx"})')
         if not path:
             return
-        self.server_mod.start_job(Path(path))
+        # Chosen by hand, so the transcript check is skipped and the file stays
+        # where it is. Queued, not refused, if the worker is already busy.
+        pipeline.WORKER.submit(path)
         self.window.show()
 
     def quit(self, _):
-        if self.stop_event:
-            self.stop_event.set()
+        if self.watcher:
+            self.watcher.stop()
         try:
             self.httpd.shutdown()
         except Exception:

@@ -32,7 +32,7 @@ OPTIONS = {
     },
     # Traced automatically, but these are imported lazily or by name.
     "includes": ["paths", "parser", "llm", "mailer", "main", "server", "window",
-                 "WebKit", "AppKit", "Foundation", "objc"],
+                 "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper"],
     "packages": ["rumps", "watchdog", "jinja2", "dotenv", "docx", "yaml", "requests",
                  "certifi", "urllib3", "charset_normalizer", "idna"],
 }

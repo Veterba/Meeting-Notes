@@ -79,8 +79,9 @@
   .banner{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
     border-radius:var(--radius);padding:10px 12px;margin-bottom:14px;font-size:12px;
     display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  #alert:not(:empty){padding:12px 16px 0}
-  #alert .banner{margin:0}
+  #alert:not(:empty),#job:not(:empty){padding:12px 16px 0}
+  #alert .banner,#job .banner{margin:0}
+  #job .banner{border-left-color:var(--accent)}
   code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
     background:var(--bg);padding:2px 5px;border-radius:4px}
   progress{width:100%;height:5px;margin-top:8px}
@@ -106,6 +107,7 @@
 </header>
 
 <div id="alert"></div>
+<div id="job"></div>
 
 <main>
   <aside>
@@ -191,6 +193,8 @@ async function refresh(){
        ${esc(f.name)}<small>${esc(f.modified)}</small></button>`).join("")
     : `<p class="empty">Nothing new in the folder</p>`;
 
+  renderJob(STATE.job);
+
   $("history").innerHTML = STATE.history.length ? STATE.history.map(h =>
     `<button class="row ${h.path===NOTES_PATH?"active":""}"
        onclick="openNotes(${JSON.stringify(h.path)})">
@@ -200,28 +204,46 @@ async function refresh(){
 
 // ---------------------------------------------------------------- jobs
 
+function jobLabel(j){
+  if (j.stage === "pull") return `Downloading ${j.i} / ${j.n} MB`;
+  if (j.stage === "map") return `Reading part ${j.i} of ${j.n}`;
+  if (j.stage === "reduce") return "Writing the notes";
+  return "Starting…";
+}
+
+// The strip under the header: one job state, whoever started it. A file the
+// watcher picked up shows here without taking the editor away.
+function renderJob(j){
+  if (!j) return;
+  const waiting = j.queued ? `<span class="note">${j.queued} waiting</span>` : "";
+  $("job").innerHTML = j.active
+    ? `<div class="banner"><span>${esc(j.file)} — ${esc(jobLabel(j))}</span>${waiting}</div>`
+    : (j.queued ? `<div class="banner">${waiting}</div>` : "");
+}
+
 async function processFile(path){
   const r = await api("/api/process", {path});
   if (!r.ok) return alert(r.error);
   watchJob();
 }
 
+// Takes over the pane for a job started from this window. Keeps polling while
+// anything is still queued, so a file waiting behind someone else's job is not
+// forgotten halfway.
 function watchJob(){
   clearInterval(POLL);
   POLL = setInterval(async () => {
     const j = await api("/api/job");
-    if (j.active){
-      const label = j.stage === "pull"
-        ? `Downloading ${j.i} / ${j.n} MB`
-        : (j.stage === "map" ? `Reading part ${j.i} of ${j.n}` : "Writing the notes");
+    if (j.active || j.queued){
       $("pane").innerHTML =
         `<h3>${esc(j.file || STATE.model)}</h3>
-         <p class="note">${esc(label)}</p>
+         <p class="note">${esc(jobLabel(j))}${j.queued ? ` · ${j.queued} waiting` : ""}</p>
          <progress ${j.n ? `value="${j.i}" max="${j.n}"` : ""}></progress>
          <p class="note">A fifteen minute meeting takes a couple of minutes.</p>`;
       return;
     }
     clearInterval(POLL);
+    POLL = null;
     await refresh();
     if (j.error) $("pane").innerHTML = `<p class="note bad">${esc(j.error)}</p>`;
     else if (j.result) openNotes(j.result);
