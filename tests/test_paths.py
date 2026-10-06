@@ -6,8 +6,6 @@ none of this can reach the real ~/Library/Application Support/Meeting Notes.
 """
 from pathlib import Path
 
-import pytest
-
 import llm
 import mailer
 import main
@@ -20,17 +18,6 @@ def fake_summarize(turns, meta, model=None, progress_cb=None):
     return {"title": meta["source"], "date": "2026-10-06", "participants": [],
             "summary": "s", "decisions": [], "action_items": [], "assumptions": [],
             "open_questions": []}
-
-
-@pytest.fixture
-def temp_env(tmp_path, monkeypatch):
-    """Point the settings file somewhere disposable, and leave no trace."""
-    monkeypatch.setattr(paths, "DATA", tmp_path)
-    monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
-    paths.reload()
-    yield tmp_path / ".env"
-    monkeypatch.undo()
-    paths.reload()
 
 
 def test_the_tests_are_not_pointed_at_the_real_data_folder():

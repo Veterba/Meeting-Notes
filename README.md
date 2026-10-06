@@ -206,7 +206,8 @@ Quit
   anything is running. A job already in progress is left to finish;
 - **Settings** writes to `.env`, which the menu, the window and the CLI all read,
   so a change takes effect at once and with no restart. The model list ticks what
-  is installed; picking one that is not downloads it.
+  is installed; picking one that is not downloads it. **Mail account…** is the
+  sheet described below.
 
 **The window opens for one meeting and nothing else**: its notes, editable, the
 recipients, and one button. It has no settings and no file list — those are the
@@ -215,6 +216,32 @@ not go anywhere until you press the button.
 
 The icons live in `assets/icon.png` and `assets/icon-paused.png`; redraw both
 with `python assets/make_icon.py`.
+
+## The mail account
+
+**Settings ▸ Mail account…** is a sheet with two fields and a *Send test email*
+button, and that is the whole of it:
+
+- the **address** the notes are sent from. It goes into `.env` as `SMTP_USER`;
+- its **app password**. It goes into the **macOS Keychain** — service
+  `Meeting Notes`, account the address — and never into a file, a log or an API
+  response. For Gmail, make one at
+  [myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords);
+  your normal password will be refused.
+
+Saving the sheet also sets `MAIL_MODE=smtp`. **Send test email** sends a short
+message from the account to itself and shows what happened in the sheet: on
+failure, the server's exact words plus a line about what to do about them.
+
+A **Gmail or googlemail address implies the rest** — `smtp.gmail.com`, port 465,
+and itself as the sender — which is why the sheet asks for nothing else. For any
+other provider, `SMTP_HOST`, `SMTP_PORT` and `SMTP_FROM` in `.env` are the way to
+say so; they are deliberately not in the menu. Without a host, nothing is tried
+and the error says which setting is missing.
+
+If an older `.env` still has `SMTP_PASSWORD` in it, it keeps working as a
+fallback, and the app offers **once** to move it into the Keychain and take it out
+of the file.
 
 ## Where transcripts come from
 
@@ -264,8 +291,8 @@ check entirely, because the choice was explicit.
    the meeting is marked `failed` in the history, with the error in its row.
 3. **The email** (`mailer.py`) — Jinja2 over `templates/email.html`.
    `MAIL_MODE=outlook_draft` creates a draft in Outlook for Mac through
-   `osascript` and does not send it; `MAIL_MODE=smtp` sends through Gmail SMTP
-   with an app password. Recipients: `RECIPIENTS` from `.env` plus participants
+   `osascript` and does not send it; `MAIL_MODE=smtp` sends through SMTP with an
+   app password (see *The mail account*). Recipients: `RECIPIENTS` from `.env` plus participants
    matched in `config/people.yaml`. Both take a bare address or
    `Name <address@example.com>`, separated by commas or semicolons, deduplicated
    by address.

@@ -43,6 +43,43 @@ def osa(script: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
+# The three buttons of the mail account sheet, in the order they are added.
+SAVE, CANCEL, TEST = 1000, 1001, 1002
+
+
+def mail_account_sheet(address: str, secret: str, status: str = "") -> tuple:
+    """The small sheet: an address, an app password, and a way to try them.
+
+    rumps' own window holds one field, so this is an NSAlert with two of them in
+    its accessory view. Returns (which button, address, password).
+    """
+    from AppKit import (NSAlert, NSMakeRect, NSSecureTextField, NSTextField, NSView)
+
+    alert = NSAlert.alloc().init()
+    alert.setMessageText_("Mail account")
+    alert.setInformativeText_(status or (
+        "The address the notes are sent from, and its app password. The password "
+        "goes into your Keychain, never into a file.\n\n"
+        "Gmail: myaccount.google.com/apppasswords"))
+    for title in ("Save", "Cancel", "Send test email"):
+        alert.addButtonWithTitle_(title)
+
+    view = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 52))
+    email = NSTextField.alloc().initWithFrame_(NSMakeRect(0, 28, 320, 22))
+    email.setStringValue_(address or "")
+    email.setPlaceholderString_("you@gmail.com")
+    field = NSSecureTextField.alloc().initWithFrame_(NSMakeRect(0, 0, 320, 22))
+    field.setStringValue_(secret or "")
+    field.setPlaceholderString_("app password")
+    view.addSubview_(email)
+    view.addSubview_(field)
+    alert.setAccessoryView_(view)
+    alert.window().setInitialFirstResponder_(email)
+
+    clicked = alert.runModal()
+    return clicked, str(email.stringValue()), str(field.stringValue())
+
+
 def notify(title: str, message: str):
     try:
         rumps.notification(title, "", message)
@@ -56,6 +93,7 @@ class TranscriptApp(rumps.App):
         self.watcher = None
         self.enabled = paths.flag("WATCH_ENABLED")
         self.status_items = []
+        self._offered_keychain = False
         # What Ollama said, last time it was asked. Filled in off the main thread,
         # because asking it is a network call and the menu must not wait for it.
         self.net = {"ollama_up": False, "model": llm.default_model(),
@@ -69,7 +107,7 @@ class TranscriptApp(rumps.App):
 
         self.rebuild()
         self.apply_watch_state()
-        threading.Thread(target=self._ensure_ollama, daemon=True).start()
+        threading.Thread(target=self._startup_checks, daemon=True).start()
 
     # ------------------------------------------------------------ the menu
 
@@ -114,6 +152,31 @@ class TranscriptApp(rumps.App):
         """Keep the status lines current while a job runs. No network, no sqlite."""
         for line, item in zip(menu.status_lines(self.status_facts()), self.status_items):
             item.title = line
+        if not self._offered_keychain:
+            self._offered_keychain = True     # before the modal, not after
+            self.offer_the_keychain()
+
+    def offer_the_keychain(self):
+        """Once: an app password left in .env from before the Keychain was used."""
+        if not (mailer.password_in_env() and mailer.account()):
+            return
+        if paths.flag("KEYCHAIN_OFFERED", False):
+            return
+        move = rumps.alert(
+            title="Move the mail password out of .env?",
+            message=(f"The app password for {mailer.account()} is sitting in plain "
+                     "text in .env. It can live in your Keychain instead, and be "
+                     "taken out of the file."),
+            ok="Move it", cancel="Leave it")
+        if not move:
+            paths.save_setting("KEYCHAIN_OFFERED", "1")
+            return
+        problem = mailer.move_password_to_keychain()
+        if problem:
+            notify("Could not use the Keychain", problem)
+            return                            # worth offering again next time
+        paths.save_setting("KEYCHAIN_OFFERED", "1")
+        notify("Password moved", "It is in your Keychain now, and out of .env.")
 
     @rumps.timer(20)
     def probe_timer(self, _):
@@ -139,7 +202,10 @@ class TranscriptApp(rumps.App):
         self.net = net
         self.rebuild() if redraw else self.tick(None)
 
-    def _ensure_ollama(self):
+    def _startup_checks(self):
+        """The slow questions, off the main thread: the Keychain and Ollama."""
+        pipeline.log.info("Keychain: %s",
+                          "available" if mailer.keychain_ready() else "NOT available")
         if not llm.ollama_up():
             if llm.start_ollama():
                 pipeline.log.info("Started Ollama")
@@ -257,6 +323,27 @@ class TranscriptApp(rumps.App):
     def choose_mail(self, sender, mode):
         paths.save_setting("MAIL_MODE", mode)
         self.rebuild()
+
+    def mail_account(self, sender, _arg=None):
+        """The address and the app password, and a way to prove they work."""
+        address, secret, status = mailer.account(), "", ""
+        while True:
+            clicked, address, secret = mail_account_sheet(address, secret, status)
+            if clicked == CANCEL:
+                return
+            if clicked == TEST:
+                # Blocking, but the sheet is modal anyway; the send has a 20 s
+                # timeout so this cannot hang the menu for longer than that.
+                ok, message = mailer.send_test(address, secret or None)
+                status = ("✓ " if ok else "✕ ") + message
+                continue
+            problem = mailer.save_account(address, secret)
+            if problem:
+                status = "✕ " + problem
+                continue
+            notify("Mail account saved", f"Sending as {address.strip()}")
+            self.rebuild()
+            return
 
     def edit_recipients(self, sender, _arg=None):
         answer = rumps.Window(

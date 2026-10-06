@@ -45,6 +45,25 @@ def box(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def temp_env(tmp_path, monkeypatch):
+    """Point the settings file somewhere disposable, and leave no trace.
+
+    The mail settings are cleared out of the environment as well, so a test
+    cannot be influenced by — or write to — the real account.
+    """
+    monkeypatch.setattr(paths, "DATA", tmp_path)
+    monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    for key in ("MAIL_MODE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_HOST",
+                "SMTP_PORT", "SMTP_FROM", "RECIPIENTS"):
+        monkeypatch.delenv(key, raising=False)
+    paths.reload()
+    yield tmp_path / ".env"
+    monkeypatch.undo()
+    paths.reload()
+
+
+@pytest.fixture
 def worker(monkeypatch):
     """A worker of this test's own, in place of the module-wide one.
 

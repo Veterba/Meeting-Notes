@@ -32,9 +32,18 @@ OPTIONS = {
     },
     # Traced automatically, but these are imported lazily or by name.
     "includes": ["paths", "parser", "llm", "mailer", "main", "server", "window",
-                 "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper"],
+                 "history", "menu",
+                 "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper",
+                 # jaraco is a namespace package, so py2app cannot take it whole.
+                 "jaraco.classes.properties", "jaraco.context", "jaraco.functools"],
     "packages": ["rumps", "watchdog", "jinja2", "dotenv", "docx", "yaml", "requests",
-                 "certifi", "urllib3", "charset_normalizer", "idna"],
+                 "certifi", "urllib3", "charset_normalizer", "idna",
+                 # keyring finds its backends through entry points, which do not
+                 # survive the bundle — mailer picks the macOS one by hand.
+                 "keyring", "importlib_metadata"],
+    # keyring ships test helpers that import pytest, which drags in numpy and
+    # pygments: 70 MB of nothing, and --deep signing then fails on numpy's dylibs.
+    "excludes": ["keyring.testing", "pytest", "_pytest", "numpy", "pygments"],
 }
 
 setup(app=APP, data_files=DATA_FILES, options={"py2app": OPTIONS},

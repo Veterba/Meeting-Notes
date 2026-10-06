@@ -22,7 +22,7 @@ if [ ! -x "$PY" ]; then
 fi
 
 # --- dependencies -------------------------------------------------------
-if ! "$PY" -c "import rumps, WebKit, watchdog, jinja2, dotenv, docx, yaml, requests" 2>/dev/null; then
+if ! "$PY" -c "import rumps, WebKit, watchdog, jinja2, dotenv, docx, yaml, requests, keyring" 2>/dev/null; then
   say "Installing dependencies"
   "$PY" -m pip install -q --upgrade pip
   "$PY" -m pip install -q -r requirements.txt

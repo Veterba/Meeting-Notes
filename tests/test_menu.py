@@ -162,7 +162,9 @@ def test_the_date_is_shown_the_short_way():
 def test_the_settings_submenu_ticks_what_is_in_use():
     settings = menu.settings_items(FACTS)
 
-    assert titles(settings) == ["Folder…", "Model", "Mail", "Default recipients…"]
+    assert titles(settings) == ["Folder…", "Model", "Mail", "Mail account…",
+                                "Default recipients…"]
+    assert find(settings, "Mail account…").action == "mail_account"
     models = find(settings, "Model").children
     assert [(m.title, m.checked) for m in models] == [
         ("qwen3.5:9b", True), ("qwen3:14b  (download)", False)]

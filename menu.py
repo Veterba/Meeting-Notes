@@ -127,6 +127,7 @@ def settings_items(facts: dict) -> list:
             Item(label, action="choose_mail", arg=mode,
                  checked=facts.get("mail_mode") == mode)
             for mode, label in MAIL_MODES)),
+        Item("Mail account…", action="mail_account"),
         Item("Default recipients…", action="edit_recipients"),
     ]
 

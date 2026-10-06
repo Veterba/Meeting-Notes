@@ -17,7 +17,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, set_key, unset_key
 
 BUNDLED = bool(getattr(sys, "frozen", False))
 
@@ -85,6 +85,14 @@ def save_setting(key: str, value: str):
     set_key(str(ENV_FILE), key, value, quote_mode="auto")
     # An environment override would otherwise silently win over what was just
     # saved, and the menu would appear to ignore the change.
+    os.environ.pop(key, None)
+    reload()
+
+
+def remove_setting(key: str):
+    """Take a setting out of .env for good — how the SMTP password leaves it."""
+    if ENV_FILE.exists():
+        unset_key(str(ENV_FILE), key)
     os.environ.pop(key, None)
     reload()
 
