@@ -13,8 +13,11 @@ __pycache__/
 assets/AppIcon.icns
 assets/AppIcon.iconset/
 
-# local settings and user data — never commit these
+# local settings and user data — never commit these.
+# .env.* covers backups like .env.old; .env.example is the one that is tracked.
 .env
+.env.*
+!.env.example
 logs/
 inbox/
 processed/

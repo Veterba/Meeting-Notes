@@ -10,45 +10,12 @@ ever watched.
 """
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
-from watchdog.observers.api import BaseObserver
 
 import llm
 import main
-
-SPEECH = [
-    ("Ivan Petrov", "Right, let us start with the release date, everything else hangs on it."),
-    ("Maria Sokolova", "Documentation is on track for Friday, the payment history part is done."),
-    ("Ivan Petrov", "Good. Then the pilot starts on Monday, the thirtieth of September."),
-    ("Maria Sokolova", "Agreed. I will warn support before Thursday and send them the notes."),
-    ("Ivan Petrov", "We also need the client letter template, that one is yours as well."),
-    ("Maria Sokolova", "I will do both and write in the channel as soon as they are ready."),
-]
-
-NOTES = {"title": "", "date": "2026-10-04", "participants": [], "summary": "s",
-         "decisions": [], "action_items": [], "assumptions": [], "open_questions": []}
-
-
-def drop(folder, name) -> "main.Path":
-    """Write a transcript that parses and passes the is-it-a-transcript check."""
-    blocks = ["WEBVTT\n"]
-    for i, (who, text) in enumerate(SPEECH, 1):
-        blocks.append(f"\n{i}\n00:00:{i * 6:02d}.000 --> 00:00:{i * 6 + 5:02d}.000\n"
-                      f"{who}: {text}\n")
-    p = main.Path(folder) / name
-    p.write_text("".join(blocks), encoding="utf-8")
-    return p
-
-
-def wait_until(condition, timeout=15.0, step=0.02) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return True
-        time.sleep(step)
-    return False
+from helpers import NOTES, live_observers, wait_until
 
 
 def all_done(worker, rec, n) -> bool:
@@ -60,11 +27,6 @@ def all_done(worker, rec, n) -> bool:
     """
     job = worker.snapshot()
     return len(rec.finished) == n and not job["active"] and not job["queued"]
-
-
-def live_observers() -> list:
-    return [t for t in threading.enumerate()
-            if isinstance(t, BaseObserver) and t.is_alive()]
 
 
 class Recorder:
@@ -98,49 +60,24 @@ class Recorder:
 
 
 @pytest.fixture
-def box(tmp_path, monkeypatch):
-    """Temp folders for everything, and a watcher that reacts within a tick."""
-    ns = SimpleNamespace(inbox=tmp_path / "inbox", processed=tmp_path / "processed",
-                         failed=tmp_path / "failed")
-    for d in vars(ns).values():
-        d.mkdir()
-    monkeypatch.setattr(main, "PROCESSED_DIR", ns.processed)
-    monkeypatch.setattr(main, "FAILED_DIR", ns.failed)
-    monkeypatch.setattr(main, "STABLE_SECONDS", 0)
-    monkeypatch.setattr(main, "POLL_SECONDS", 0.05)
-    return ns
-
-
-@pytest.fixture
 def rec(monkeypatch):
     r = Recorder()
     monkeypatch.setattr(llm, "summarize", r.summarize)
+    monkeypatch.setattr(llm, "ollama_up", lambda: True)   # never ask the real one
     return r
 
 
 @pytest.fixture
-def worker(monkeypatch):
-    """A worker of this test's own, in place of the module-wide one.
-
-    main.submit_detected reads main.WORKER when the watcher calls it, so patching
-    the module attribute leaves the real wiring in place.
-    """
-    w = main.Worker()
-    monkeypatch.setattr(main, "WORKER", w)
-    yield w
-    w.stop(timeout=15)
-
-
-@pytest.fixture
 def watcher(box, worker):
-    w = main.Watcher(box.inbox)
+    w = main.Watcher()                   # the folder comes from paths
     yield w
     w.stop()
 
 
-def test_restarting_the_watcher_does_not_wait_for_a_running_job(box, rec, worker, watcher):
+def test_restarting_the_watcher_does_not_wait_for_a_running_job(
+        box, rec, worker, watcher, transcript):
     rec.gate = threading.Event()
-    drop(box.inbox, "first.vtt")
+    transcript(box.inbox, "first.vtt")
     watcher.start()
     assert rec.entered.wait(15), "the dropped file was never processed"
     first_observer = watcher.observer
@@ -154,7 +91,7 @@ def test_restarting_the_watcher_does_not_wait_for_a_running_job(box, rec, worker
     assert live_observers() == [watcher.observer], "more than one observer"
     assert rec.live == 1, "the running job was disturbed by the restart"
 
-    drop(box.inbox, "second.vtt")         # dropped after the restart
+    transcript(box.inbox, "second.vtt")   # dropped after the restart
     rec.gate.set()
 
     assert wait_until(lambda: all_done(worker, rec, 2)), f"only did {rec.finished}"
@@ -164,12 +101,13 @@ def test_restarting_the_watcher_does_not_wait_for_a_running_job(box, rec, worker
     assert (box.processed / "second.json").exists()
 
 
-def test_two_files_dropped_together_run_one_after_the_other(box, rec, worker, watcher):
+def test_two_files_dropped_together_run_one_after_the_other(
+        box, rec, worker, watcher, transcript):
     events = []
     worker.on_event = lambda kind, target, payload: events.append((kind, str(target)))
 
-    drop(box.inbox, "a.vtt")
-    drop(box.inbox, "b.vtt")
+    transcript(box.inbox, "a.vtt")
+    transcript(box.inbox, "b.vtt")
     watcher.start()
 
     assert wait_until(lambda: all_done(worker, rec, 2)), f"only did {rec.finished}"
@@ -180,10 +118,10 @@ def test_two_files_dropped_together_run_one_after_the_other(box, rec, worker, wa
     assert [k for k, _ in events] == ["done", "done"]
 
 
-def test_a_hand_picked_job_waits_instead_of_being_refused(box, rec, worker):
+def test_a_hand_picked_job_waits_instead_of_being_refused(box, rec, worker, transcript):
     rec.gate = threading.Event()
-    first = drop(box.inbox, "first.vtt")
-    second = drop(box.inbox, "second.vtt")
+    first = transcript(box.inbox, "first.vtt")
+    second = transcript(box.inbox, "second.vtt")
 
     assert worker.submit(first)["queued"] is True
     assert rec.entered.wait(15), "the first job never started"

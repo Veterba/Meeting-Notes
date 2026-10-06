@@ -55,8 +55,9 @@ Checks before saying something is done:
 ---
 
 ## Real data, mail and the machine
-- Never point the watcher, tests or CLI at my real `~/Downloads`. Use a temp dir via
-  `INBOX_DIR` / `PROCESSED_DIR` / `FAILED_DIR` env vars. Never move or delete my files there.
+- Never point the watcher, tests or CLI at my real `~/Downloads` or at my real data folder
+  (`~/Library/Application Support/Meeting Notes`). Use a temp dir via `MEETING_NOTES_DATA`
+  (the whole data folder), `INBOX_DIR` and `PROCESSED_DIR`. Never move or delete my files.
 - Never send real email. Tests mock `smtplib` and `osascript`. Don't call `mailer.deliver`
   outside a test, don't create Outlook drafts.
 - Never read, print or log `.env` — it holds the SMTP password. Use `.env.example`.

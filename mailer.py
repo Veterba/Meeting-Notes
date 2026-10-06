@@ -7,18 +7,17 @@ from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
 
 import yaml
-from dotenv import load_dotenv
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from paths import CODE, ENV_FILE, PEOPLE_FILE
-
-load_dotenv(ENV_FILE)
-
-BASE = CODE
-MAIL_MODE = os.getenv("MAIL_MODE", "outlook_draft")
+import paths
+from paths import CODE, PEOPLE_FILE
 
 _env = Environment(loader=FileSystemLoader(CODE / "templates"),
                    autoescape=select_autoescape(["html"]))
+
+
+def mail_mode() -> str:
+    return paths.setting("MAIL_MODE", "outlook_draft")
 
 
 def load_people() -> dict:
@@ -67,7 +66,7 @@ def resolve_recipients(participants) -> list:
             seen.add(addr)
             out.append(entry)
 
-    for entry in split_addresses(os.getenv("RECIPIENTS", "")):
+    for entry in split_addresses(paths.setting("RECIPIENTS")):
         add(entry)
 
     people = load_people()
@@ -137,16 +136,16 @@ def create_outlook_draft(subject: str, html: str, recipients: list) -> str:
 
 
 def send_smtp(subject: str, html: str, recipients: list) -> str:
-    host = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    port = int(os.getenv("SMTP_PORT", "465"))
-    user = os.getenv("SMTP_USER", "")
-    password = os.getenv("SMTP_PASSWORD", "")
+    host = paths.setting("SMTP_HOST", "smtp.gmail.com")
+    port = paths.setting_int("SMTP_PORT", 465)
+    user = paths.setting("SMTP_USER")
+    password = paths.setting("SMTP_PASSWORD")
     if not user or not password:
         raise RuntimeError("SMTP_USER / SMTP_PASSWORD are not set in .env")
 
     msg = EmailMessage()
     msg["Subject"] = subject
-    msg["From"] = os.getenv("SMTP_FROM", user)
+    msg["From"] = paths.setting("SMTP_FROM", user)
     msg["To"] = ", ".join(recipients)
     msg.set_content("This message is HTML. Open it in a client that renders HTML.")
     msg.add_alternative(html, subtype="html")
@@ -159,7 +158,7 @@ def send_smtp(subject: str, html: str, recipients: list) -> str:
 
 def deliver(data: dict, recipients: list, mode: str = None) -> str:
     """The single delivery point. Only ever called from a button in the UI."""
-    mode = mode or MAIL_MODE
+    mode = mode or mail_mode()
     if not recipients:
         raise RuntimeError("Recipient list is empty")
     bad = [r for r in recipients if "@" not in email_of(r)]

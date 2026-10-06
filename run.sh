@@ -28,12 +28,9 @@ if ! "$PY" -c "import rumps, WebKit, watchdog, jinja2, dotenv, docx, yaml, reque
   "$PY" -m pip install -q -r requirements.txt
 fi
 
-# --- settings file ------------------------------------------------------
-if [ ! -f .env ]; then
-  say "Creating .env from .env.example"
-  cp .env.example .env
-  echo "    Edit .env, or use the menu: folder, recipients, delivery mode."
-fi
+# Settings, notes and logs live in the data folder, not here — the first start
+# creates it from .env.example, or from this folder's .env if there is one.
+# MEETING_NOTES_DATA overrides it, for a dev run that must not touch the real one.
 
 # --- Ollama -------------------------------------------------------------
 command -v ollama >/dev/null || die "Ollama not found. Install it: brew install ollama"
@@ -66,6 +63,7 @@ fi
 # --- go -----------------------------------------------------------------
 pkill -f "menubar.py" 2>/dev/null || true
 say "Model: $MODEL"
-say "Watching: $("$PY" -c "import main; print(main.INBOX_DIR)")"
+say "Data:     $("$PY" -c "import paths; print(paths.DATA)")"
+say "Watching: $("$PY" -c "import paths; print(paths.inbox())")"
 say "The icon is in the menu bar. Ctrl-C here, or Quit from the menu, to stop."
 exec "$PY" menubar.py

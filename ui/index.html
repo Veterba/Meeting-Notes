@@ -31,34 +31,7 @@
   label{display:block;font-size:11px;font-weight:590;letter-spacing:.04em;
     text-transform:uppercase;color:var(--dim);margin:0 0 5px}
 
-  /* ---------- chrome ---------- */
-  header{display:flex;align-items:center;gap:14px;padding:10px 16px;
-    background:var(--panel);border-bottom:1px solid var(--line);
-    position:sticky;top:0;z-index:5;flex-wrap:wrap;}
-  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);
-    white-space:nowrap}
-  .dot{width:7px;height:7px;border-radius:50%;background:var(--bad);flex:none}
-  .dot.on{background:var(--ok)}
-  .spacer{flex:1}
-  .switch{display:inline-flex;align-items:center;gap:7px;font-size:12px;cursor:pointer}
-  .switch input{width:auto;margin:0}
-
-  main{display:grid;grid-template-columns:230px 1fr;gap:0;align-items:start}
-  @media (max-width:720px){ main{grid-template-columns:1fr} aside{border-right:0!important} }
-
-  aside{border-right:1px solid var(--line);padding:14px 12px;min-height:calc(100vh - 44px)}
-  aside h2{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);
-    margin:0 0 7px;font-weight:590}
-  aside h2:not(:first-child){margin-top:20px}
-  .row{display:block;width:100%;text-align:left;border:0;background:0;padding:6px 8px;
-    border-radius:6px;line-height:1.35}
-  .row:hover{background:var(--panel)}
-  .row.active{background:var(--accent);color:#fff}
-  .row.active small{color:rgba(255,255,255,.8)}
-  .row small{display:block;color:var(--dim);font-size:11px}
-  .empty{color:var(--dim);font-size:12px;padding:4px 8px}
-
-  section.pane{padding:18px 20px 40px;max-width:760px}
+  section.pane{padding:18px 20px 40px;max-width:760px;margin:0 auto}
   .grid2{display:grid;grid-template-columns:1fr 150px;gap:12px}
   .field{margin-bottom:14px}
   .items{display:flex;flex-direction:column;gap:6px}
@@ -76,87 +49,25 @@
     padding-bottom:calc(10px + env(safe-area-inset-bottom,0px))}
   .note{font-size:12px;color:var(--dim)}
   .note.ok{color:var(--ok)} .note.bad{color:var(--bad)}
-  .banner{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--warn);
-    border-radius:var(--radius);padding:10px 12px;margin-bottom:14px;font-size:12px;
+  .empty{color:var(--dim);font-size:12px;padding:30px 0;text-align:center}
+  .banner{background:var(--panel);border:1px solid var(--line);border-left:3px solid var(--accent);
+    border-radius:var(--radius);padding:10px 12px;font-size:12px;
     display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-  #alert:not(:empty),#job:not(:empty){padding:12px 16px 0}
-  #alert .banner,#job .banner{margin:0}
-  #job .banner{border-left-color:var(--accent)}
-  code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
-    background:var(--bg);padding:2px 5px;border-radius:4px}
+  #job:not(:empty){padding:12px 20px 0;max-width:760px;margin:0 auto}
   progress{width:100%;height:5px;margin-top:8px}
-  dialog{border:0;border-radius:12px;padding:0;background:var(--panel);color:var(--ink);
-    box-shadow:0 20px 60px rgba(0,0,0,.35);max-width:440px;width:92vw}
-  dialog::backdrop{background:rgba(0,0,0,.35)}
-  .dlg-body{padding:18px 20px}
-  .dlg-foot{padding:12px 20px;border-top:1px solid var(--line);display:flex;
-    justify-content:flex-end;gap:9px}
-  .path{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
-    color:var(--dim);word-break:break-all}
 </style>
 </head>
 <body>
 
-<header>
-  <span class="chip"><span class="dot" id="d-ollama"></span><span id="t-ollama">…</span></span>
-  <span class="chip" id="t-model">—</span>
-  <span class="chip" id="t-folder">—</span>
-  <span class="spacer"></span>
-  <label class="switch"><input type="checkbox" id="watch"> Watch folder</label>
-  <button onclick="openSettings()">Settings</button>
-</header>
-
-<div id="alert"></div>
 <div id="job"></div>
 
-<main>
-  <aside>
-    <h2>Inbox</h2>
-    <div id="files"></div>
-    <h2>Recent notes</h2>
-    <div id="history"></div>
-  </aside>
-
-  <section class="pane" id="pane">
-    <p class="empty">Pick a transcript on the left, or drop one into the watched folder.</p>
-  </section>
-</main>
-
-<dialog id="settings">
-  <div class="dlg-body">
-    <div class="field">
-      <label>Transcript folder</label>
-      <div style="display:flex;gap:8px;align-items:center">
-        <span class="path" id="s-folder"></span>
-        <button onclick="chooseFolder()" style="flex:none">Change…</button>
-      </div>
-    </div>
-    <div class="field">
-      <label>Model</label>
-      <select id="s-model"></select>
-    </div>
-    <div class="field">
-      <label>Delivery</label>
-      <select id="s-mail">
-        <option value="outlook_draft">Draft in Outlook — nothing is sent</option>
-        <option value="smtp">Send over SMTP</option>
-      </select>
-    </div>
-    <div class="field" style="margin-bottom:0">
-      <label>Default recipients</label>
-      <textarea id="s-recipients" rows="3"
-        placeholder="one per line — address, or Name &lt;address&gt;"></textarea>
-    </div>
-  </div>
-  <div class="dlg-foot">
-    <button onclick="settings.close()">Cancel</button>
-    <button class="primary" onclick="saveSettings()">Save</button>
-  </div>
-</dialog>
+<section class="pane" id="pane">
+  <p class="empty">Pick a meeting from the menu bar to read its notes.</p>
+</section>
 
 <script>
 const TOKEN = "__TOKEN__";
-let STATE = null, NOTES = null, NOTES_PATH = null, POLL = null;
+let STATE = null, NOTES = null, NOTES_PATH = null;
 
 const $ = id => document.getElementById(id);
 const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c =>
@@ -171,48 +82,19 @@ async function api(path, body){
   return r.json();
 }
 
-// ---------------------------------------------------------------- state
+// ---------------------------------------------------------------- the job strip
 
-async function refresh(){
-  STATE = await api("/api/state");
-  $("d-ollama").className = "dot" + (STATE.ollama ? " on" : "");
-  $("t-ollama").textContent = STATE.ollama ? "Ollama running" : "Ollama not responding";
-  $("t-model").textContent = STATE.model + (STATE.model_ready ? "" : " · not downloaded");
-  $("t-folder").textContent = STATE.folder.replace(/^\/Users\/[^/]+/, "~");
-  $("watch").checked = STATE.watching;
-
-  $("alert").innerHTML = STATE.ollama ? "" : (STATE.ollama_installed
-    ? `<div class="banner"><span>Ollama is not running.</span>
-         <button onclick="startOllama(this)">Start it</button></div>`
-    : `<div class="banner"><span>Ollama is not installed — it is the local model
-         runner this app needs. Install it from <b>ollama.com</b>, or in a terminal:
-         <code>brew install ollama</code></span></div>`);
-
-  $("files").innerHTML = STATE.files.length ? STATE.files.map(f =>
-    `<button class="row" onclick="processFile(${JSON.stringify(f.path)})">
-       ${esc(f.name)}<small>${esc(f.modified)}</small></button>`).join("")
-    : `<p class="empty">Nothing new in the folder</p>`;
-
-  renderJob(STATE.job);
-
-  $("history").innerHTML = STATE.history.length ? STATE.history.map(h =>
-    `<button class="row ${h.path===NOTES_PATH?"active":""}"
-       onclick="openNotes(${JSON.stringify(h.path)})">
-       ${esc(h.title)}<small>${esc(h.date || h.modified)}</small></button>`).join("")
-    : `<p class="empty">No meetings yet</p>`;
-}
-
-// ---------------------------------------------------------------- jobs
+const STAGES = {map: "reading", reduce: "writing the notes",
+                pull: "downloading the model", waiting: "waiting for Ollama"};
 
 function jobLabel(j){
-  if (j.stage === "pull") return `Downloading ${j.i} / ${j.n} MB`;
-  if (j.stage === "map") return `Reading part ${j.i} of ${j.n}`;
-  if (j.stage === "reduce") return "Writing the notes";
-  return "Starting…";
+  const stage = STAGES[j.stage] || "working";
+  return j.stage === "map" || j.stage === "pull"
+    ? `${stage} ${j.i} of ${j.n}` : stage;
 }
 
-// The strip under the header: one job state, whoever started it. A file the
-// watcher picked up shows here without taking the editor away.
+// One job state, whoever started it. The menu bar shows the same thing; here it
+// says that a meeting is being summarised while you read another one.
 function renderJob(j){
   if (!j) return;
   const waiting = j.queued ? `<span class="note">${j.queued} waiting</span>` : "";
@@ -221,55 +103,32 @@ function renderJob(j){
     : (j.queued ? `<div class="banner">${waiting}</div>` : "");
 }
 
-async function processFile(path){
-  const r = await api("/api/process", {path});
-  if (!r.ok) return alert(r.error);
-  watchJob();
+async function refresh(){
+  STATE = await api("/api/state");
+  renderJob(STATE.job);
+  const button = $("send-btn");
+  if (button) button.textContent = sendLabel();
 }
 
-// Takes over the pane for a job started from this window. Keeps polling while
-// anything is still queued, so a file waiting behind someone else's job is not
-// forgotten halfway.
-function watchJob(){
-  clearInterval(POLL);
-  POLL = setInterval(async () => {
-    const j = await api("/api/job");
-    if (j.active || j.queued){
-      $("pane").innerHTML =
-        `<h3>${esc(j.file || STATE.model)}</h3>
-         <p class="note">${esc(jobLabel(j))}${j.queued ? ` · ${j.queued} waiting` : ""}</p>
-         <progress ${j.n ? `value="${j.i}" max="${j.n}"` : ""}></progress>
-         <p class="note">A fifteen minute meeting takes a couple of minutes.</p>`;
-      return;
-    }
-    clearInterval(POLL);
-    POLL = null;
-    await refresh();
-    if (j.error) $("pane").innerHTML = `<p class="note bad">${esc(j.error)}</p>`;
-    else if (j.result) openNotes(j.result);
-    else $("pane").innerHTML = `<p class="note ok">${esc(j.note || "Done")}</p>`;
-  }, 700);
-}
+// ---------------------------------------------------------------- the editor
 
-// ---------------------------------------------------------------- editor
-
-async function openNotes(path){
-  NOTES_PATH = path;
-  NOTES = await api("/api/notes?path=" + encodeURIComponent(path));
-  renderNotes();
-  refresh();
+function sendLabel(){
+  return STATE && STATE.mail_mode === "smtp" ? "Send over SMTP"
+                                             : "Create draft in Outlook";
 }
 
 function lines(a){ return (a || []).join("\n"); }
 
+async function openNotes(path){
+  if (!STATE) await refresh();
+  NOTES_PATH = path;
+  NOTES = await api("/api/notes?path=" + encodeURIComponent(path));
+  renderNotes();
+}
+
 function renderNotes(){
   const d = NOTES;
-  const rec = (STATE.recipients || []).join("\n");
   $("pane").innerHTML = `
-    ${STATE.model_ready ? "" : `<div class="banner">
-      <span>Model <b>${esc(STATE.model)}</b> is not downloaded.</span>
-      <button onclick="pullModel()">Download</button></div>`}
-
     <div class="grid2">
       <div class="field"><label>Title</label>
         <input id="f-title" value="${esc(d.title)}"></div>
@@ -295,12 +154,13 @@ function renderNotes(){
       <div id="f-assumptions"></div></details>
 
     <div class="field"><label>Recipients — one per line</label>
-      <textarea id="f-recipients" rows="3">${esc(rec)}</textarea></div>
+      <textarea id="f-recipients" rows="3">${esc(lines(
+        (d.recipients && d.recipients.length ? d.recipients : (STATE.recipients || []))
+      ))}</textarea></div>
 
     <div class="bar">
       <button onclick="saveNotes()">Save</button>
-      <button class="primary" onclick="send()">${
-        STATE.mail_mode === "smtp" ? "Send over SMTP" : "Create draft in Outlook"}</button>
+      <button class="primary" id="send-btn" onclick="send()">${sendLabel()}</button>
       <span class="note" id="status"></span>
     </div>`;
   renderActions();
@@ -310,110 +170,97 @@ function renderNotes(){
 function renderActions(){
   $("f-actions").innerHTML = (NOTES.action_items || []).map((a, i) => `
     <div class="item">
-      <input value="${esc(a.owner)}" placeholder="owner" oninput="NOTES.action_items[${i}].owner=this.value">
-      <input value="${esc(a.task)}" placeholder="task" oninput="NOTES.action_items[${i}].task=this.value">
-      <input value="${esc(a.deadline || '')}" placeholder="due" oninput="NOTES.action_items[${i}].deadline=this.value||null">
-      <button class="x" onclick="NOTES.action_items.splice(${i},1);renderActions()">✕</button>
+      <input class="a-owner" value="${esc(a.owner)}" placeholder="owner">
+      <input class="a-task" value="${esc(a.task)}" placeholder="task">
+      <input class="a-due" value="${esc(a.deadline || '')}" placeholder="due">
+      <button class="x" onclick="removeAction(${i})">✕</button>
     </div>`).join("");
-}
-function addAction(){
-  (NOTES.action_items = NOTES.action_items || []).push({owner:"",task:"",deadline:null});
-  renderActions();
 }
 
 function renderAssumptions(){
   $("f-assumptions").innerHTML = (NOTES.assumptions || []).map((s, i) => `
-    <div class="assumption">
+    <div class="assumption" data-quote="${esc(s.evidence_quote)}">
       <div class="item" style="grid-template-columns:1fr 110px 26px">
-        <input value="${esc(s.statement)}" oninput="NOTES.assumptions[${i}].statement=this.value">
-        <select onchange="NOTES.assumptions[${i}].confidence=this.value">
+        <input class="s-statement" value="${esc(s.statement)}">
+        <select class="s-confidence">
           ${["low","medium","high"].map(l =>
             `<option ${s.confidence===l?"selected":""}>${l}</option>`).join("")}
         </select>
-        <button class="x" onclick="NOTES.assumptions.splice(${i},1);renderAssumptions()">✕</button>
+        <button class="x" onclick="removeAssumption(${i})">✕</button>
       </div>
       <div class="quote">“${esc(s.evidence_quote)}”</div>
     </div>`).join("") || `<p class="note">None — nothing was inferred.</p>`;
 }
 
+// Everything is read back out of the page, including the action items and the
+// assumptions. Inline handlers cannot see the script's own variables, so the
+// rows used to look edited and save unchanged.
 function collect(){
   const split = id => $(id).value.split("\n").map(s => s.trim()).filter(Boolean);
-  NOTES.title = $("f-title").value;
-  NOTES.date = $("f-date").value;
+  const rows = sel => [...document.querySelectorAll(sel)];
+  NOTES.title = $("f-title").value.trim();
+  NOTES.date = $("f-date").value.trim();
   NOTES.participants = $("f-participants").value.split(",").map(s => s.trim()).filter(Boolean);
-  NOTES.summary = $("f-summary").value;
+  NOTES.summary = $("f-summary").value.trim();
   NOTES.decisions = split("f-decisions");
   NOTES.open_questions = split("f-questions");
+  NOTES.action_items = rows("#f-actions .item").map(row => ({
+    owner: row.querySelector(".a-owner").value.trim(),
+    task: row.querySelector(".a-task").value.trim(),
+    deadline: row.querySelector(".a-due").value.trim() || null,
+  })).filter(a => a.owner || a.task);
+  NOTES.assumptions = rows("#f-assumptions .assumption").map(row => ({
+    statement: row.querySelector(".s-statement").value.trim(),
+    confidence: row.querySelector(".s-confidence").value,
+    evidence_quote: row.dataset.quote || "",
+  })).filter(a => a.statement);
   return NOTES;
 }
 
-function say(msg, cls){ const el = $("status"); if(el){ el.textContent = msg; el.className = "note " + (cls||""); } }
+function addAction(){
+  collect();
+  NOTES.action_items.push({owner:"", task:"", deadline:null});
+  renderActions();
+}
+
+function removeAction(i){
+  collect();
+  NOTES.action_items.splice(i, 1);
+  renderActions();
+}
+
+function removeAssumption(i){
+  collect();
+  NOTES.assumptions.splice(i, 1);
+  renderAssumptions();
+}
+
+function say(msg, cls){
+  const el = $("status");
+  if (el){ el.textContent = msg; el.className = "note " + (cls || ""); }
+}
 
 async function saveNotes(){
   await api("/api/notes", {path: NOTES_PATH, data: collect()});
   say("Saved", "ok");
-  refresh();
 }
 
 async function send(){
-  const rec = $("f-recipients").value.split("\n").map(s => s.trim()).filter(Boolean);
+  const recipients = $("f-recipients").value.split("\n").map(s => s.trim()).filter(Boolean);
   say("Working…");
-  await api("/api/notes", {path: NOTES_PATH, data: collect()});
-  const r = await api("/api/send", {data: NOTES, recipients: rec});
+  const data = collect();
+  data.recipients = recipients;
+  await api("/api/notes", {path: NOTES_PATH, data});
+  const r = await api("/api/send", {data, recipients, path: NOTES_PATH});
   say(r.ok ? r.message : r.error, r.ok ? "ok" : "bad");
 }
-
-async function startOllama(btn){
-  btn.disabled = true; btn.textContent = "Starting…";
-  const r = await api("/api/ollama", {});
-  if (!r.ok){ btn.disabled = false; btn.textContent = "Start it";
-              alert("Could not start Ollama. Is it installed?"); return; }
-  refresh();
-}
-
-async function pullModel(){
-  await api("/api/pull", {model: STATE.model});
-  watchJob();
-}
-
-// ---------------------------------------------------------------- settings
-
-function openSettings(){
-  $("s-folder").textContent = STATE.folder;
-  $("s-model").innerHTML = STATE.models.map(m =>
-    `<option ${m===STATE.model?"selected":""}>${esc(m)}</option>`).join("");
-  $("s-mail").value = STATE.mail_mode;
-  $("s-recipients").value = (STATE.recipients || []).join("\n");
-  settings.showModal();
-}
-
-async function chooseFolder(){
-  const r = await api("/api/choose", {kind: "folder"});
-  if (r.path) $("s-folder").textContent = r.path.replace(/\/$/, "");
-}
-
-async function saveSettings(){
-  await api("/api/settings", {
-    INBOX_DIR: $("s-folder").textContent,
-    OLLAMA_MODEL: $("s-model").value,
-    MAIL_MODE: $("s-mail").value,
-    RECIPIENTS: $("s-recipients").value.split("\n").map(s => s.trim()).filter(Boolean).join(", "),
-  });
-  settings.close();
-  refresh();
-}
-
-$("watch").addEventListener("change", async e => {
-  await api("/api/settings", {WATCH_ENABLED: e.target.checked ? "1" : "0"});
-  refresh();
-});
 
 (async () => {
   await refresh();
   const wanted = new URLSearchParams(location.search).get("open");
   if (wanted) openNotes(wanted);
 })();
-setInterval(() => { if (!POLL) refresh(); }, 5000);
+setInterval(refresh, 3000);
 </script>
 </body>
 </html>

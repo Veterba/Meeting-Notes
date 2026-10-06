@@ -1,6 +1,5 @@
 """Local Ollama: model choice, map-reduce, schema-constrained JSON."""
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -8,20 +7,32 @@ import time
 from pathlib import Path
 
 import requests
-from dotenv import load_dotenv
 
-from paths import CODE, ENV_FILE
+import paths
 
-load_dotenv(ENV_FILE)
+# "Ollama is not running" as opposed to "Ollama refused": a job that hits this is
+# held and retried rather than marked failed.
+UNREACHABLE = requests.exceptions.ConnectionError
 
-BASE = CODE
-OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434").rstrip("/")
-NUM_CTX = int(os.getenv("NUM_CTX", "32768"))
-TEMPERATURE = float(os.getenv("TEMPERATURE", "0.2"))
-CHUNK_TOKENS = int(os.getenv("CHUNK_TOKENS", "5000"))
-MAP_THRESHOLD_TOKENS = int(os.getenv("MAP_THRESHOLD_TOKENS", "6000"))
-OVERLAP_TURNS = int(os.getenv("OVERLAP_TURNS", "2"))
-REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "1800"))
+# Settings are read when they are used, not at import: the model or the Ollama
+# address can change in the menu while the app is running.
+DEFAULTS = {"OLLAMA_URL": "http://localhost:11434", "NUM_CTX": 32768,
+            "TEMPERATURE": 0.2, "CHUNK_TOKENS": 5000, "MAP_THRESHOLD_TOKENS": 6000,
+            "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
+            "RAM_FOR_BIG": 24, "RAM_FOR_MID": 20}
+
+
+def url() -> str:
+    return paths.setting("OLLAMA_URL", DEFAULTS["OLLAMA_URL"]).rstrip("/")
+
+
+def num(key: str) -> float:
+    return paths.setting_float(key, DEFAULTS[key])
+
+
+def timeout() -> int:
+    return int(num("REQUEST_TIMEOUT"))
+
 
 # The threshold is not the size of the model file but weights plus the KV cache
 # for NUM_CTX, and all of it has to fit in memory at once: 14b at 32k context is
@@ -31,9 +42,6 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "1800"))
 MODEL_BIG = "qwen3:30b-a3b"      # 24 GB and up
 MODEL_MID = "qwen3:14b"          # 20 GB and up
 MODEL_SMALL = "qwen3.5:9b"       # below 20 GB
-RAM_FOR_BIG = float(os.getenv("RAM_FOR_BIG", "24"))
-RAM_FOR_MID = float(os.getenv("RAM_FOR_MID", "20"))
-
 SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {
@@ -109,20 +117,20 @@ def ram_gb() -> float:
 
 
 def default_model() -> str:
-    env = os.getenv("OLLAMA_MODEL", "").strip()
-    if env:
-        return env
+    chosen = paths.setting("OLLAMA_MODEL").strip()
+    if chosen:
+        return chosen
     ram = ram_gb()
-    if ram >= RAM_FOR_BIG:
+    if ram >= num("RAM_FOR_BIG"):
         return MODEL_BIG
-    if ram >= RAM_FOR_MID:
+    if ram >= num("RAM_FOR_MID"):
         return MODEL_MID
     return MODEL_SMALL
 
 
 def ollama_up() -> bool:
     try:
-        return requests.get(f"{OLLAMA_URL}/api/tags", timeout=3).ok
+        return requests.get(f"{url()}/api/tags", timeout=3).ok
     except Exception:
         return False
 
@@ -159,7 +167,7 @@ def start_ollama(timeout: float = 30) -> bool:
 
 def installed_models() -> list:
     try:
-        r = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        r = requests.get(f"{url()}/api/tags", timeout=5)
         return [m["name"] for m in r.json().get("models", [])]
     except Exception:
         return []
@@ -172,8 +180,8 @@ def has_model(name: str) -> bool:
 
 def pull_model(name: str, progress_cb=None):
     """Download a model, reporting progress_cb(status, done_bytes, total_bytes)."""
-    r = requests.post(f"{OLLAMA_URL}/api/pull", json={"model": name, "stream": True},
-                      stream=True, timeout=REQUEST_TIMEOUT)
+    r = requests.post(f"{url()}/api/pull", json={"model": name, "stream": True},
+                      stream=True, timeout=timeout())
     r.raise_for_status()
     for line in r.iter_lines():
         if not line:
@@ -237,14 +245,15 @@ def generate_json(prompt: str, schema: dict, model: str) -> dict:
         "stream": False,
         "format": schema,
         "think": False,
-        "options": {"num_ctx": NUM_CTX, "temperature": TEMPERATURE},
+        "options": {"num_ctx": int(num("NUM_CTX")), "temperature": num("TEMPERATURE")},
     }
+    endpoint, limit = f"{url()}/api/generate", timeout()
     last_err = None
     for attempt in (1, 2):
-        r = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=REQUEST_TIMEOUT)
+        r = requests.post(endpoint, json=payload, timeout=limit)
         if r.status_code == 400 and "think" in r.text.lower():
             payload.pop("think", None)   # model has no thinking mode
-            r = requests.post(f"{OLLAMA_URL}/api/generate", json=payload, timeout=REQUEST_TIMEOUT)
+            r = requests.post(endpoint, json=payload, timeout=limit)
         r.raise_for_status()
         raw = r.json().get("response", "")
         try:
@@ -265,13 +274,15 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 3)
 
 
-def chunk_turns(turns, max_tokens=CHUNK_TOKENS, overlap=OVERLAP_TURNS):
+def chunk_turns(turns, max_tokens=None, overlap=None):
     """Split on turn boundaries, never mid-sentence, with a small overlap.
 
     Cutting inside a sentence makes nonsense of both halves, and the model then
     invents meaning to fill the gap. The overlap keeps a decision voiced across
     a chunk boundary from falling between two chunks.
     """
+    max_tokens = int(max_tokens if max_tokens is not None else num("CHUNK_TOKENS"))
+    overlap = int(overlap if overlap is not None else num("OVERLAP_TURNS"))
     chunks, cur, cur_tokens = [], [], 0
     for turn in turns:
         t = estimate_tokens(f"{turn[0]}: {turn[1]}")
@@ -292,7 +303,7 @@ def _prompt(name: str, **vars_) -> str:
     Plain str.replace rather than Jinja2: the prompts are full of curly braces
     from the JSON examples, which a template engine would trip over.
     """
-    text = (BASE / "prompts" / f"{name}.md").read_text(encoding="utf-8")
+    text = (paths.CODE / "prompts" / f"{name}.md").read_text(encoding="utf-8")
     for k, v in vars_.items():
         text = text.replace("{{" + k + "}}", str(v))
     return text
@@ -312,7 +323,7 @@ def summarize(turns, meta: dict, model: str = None, progress_cb=None) -> dict:
         if progress_cb:
             progress_cb(stage, i, n)
 
-    if estimate_tokens(full) <= MAP_THRESHOLD_TOKENS:
+    if estimate_tokens(full) <= num("MAP_THRESHOLD_TOKENS"):
         report("reduce", 1, 1)
         result = generate_json(
             _prompt("reduce", META=meta_line, NOTES="", TRANSCRIPT=full), SUMMARY_SCHEMA, model)

@@ -1,87 +1,37 @@
-"""Local HTTP API behind the app window.
+"""Local HTTP API behind the review window.
 
 Bound to 127.0.0.1 and gated by a token generated at startup, so nothing else on
 the machine can drive the pipeline through it. The window passes the token; the
 page never leaves the loopback interface.
+
+The window reviews and sends one meeting's notes, and that is all this serves.
+Everything else — the folder, the model, the recipients, what to process and what
+to try again — lives in the menu bar, which calls the pipeline directly.
 """
 import json
 import mimetypes
-import os
 import secrets
 import threading
-import time
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-import llm
+import history
 import mailer
 import main as pipeline
+import paths
 
-from paths import CODE
-
-UI_DIR = CODE / "ui"
+UI_DIR = paths.CODE / "ui"
 
 TOKEN = secrets.token_urlsafe(24)
 
-# Set by the menu bar app so settings changes restart the watcher.
-on_settings_changed = None
-
-
-def _env_flag(key: str, default: bool = True) -> bool:
-    return os.getenv(key, "1" if default else "0").strip().lower() \
-        not in ("0", "false", "no", "off", "")
-
 
 def state() -> dict:
-    inbox = pipeline.INBOX_DIR
-    files = []
-    # Same age rule as the watcher, so the list shows what would actually be
-    # picked up — not every .docx that has ever been downloaded.
-    cutoff = time.time() - pipeline.SCAN_MAX_AGE_HOURS * 3600
-    if inbox.exists():
-        for f in sorted(inbox.iterdir(), key=lambda f: f.stat().st_mtime, reverse=True):
-            if (f.is_file() and f.suffix.lower() in pipeline.EXTENSIONS
-                    and f.stat().st_mtime >= cutoff):
-                files.append({"path": str(f), "name": f.name,
-                              "modified": datetime.fromtimestamp(f.stat().st_mtime)
-                              .strftime("%d %b %H:%M")})
-    history = []
-    for f in sorted(pipeline.PROCESSED_DIR.glob("*.json"),
-                    key=lambda f: f.stat().st_mtime, reverse=True)[:25]:
-        try:
-            d = json.loads(f.read_text(encoding="utf-8"))
-            title, date = d.get("title") or f.stem, d.get("date", "")
-        except Exception:
-            title, date = f.name, ""
-        history.append({"path": str(f), "title": title, "date": date,
-                        "modified": datetime.fromtimestamp(f.stat().st_mtime)
-                        .strftime("%d %b %H:%M")})
-
-    up = llm.ollama_up()
-    model = llm.default_model()
-    installed = llm.installed_models() if up else []
-    choices = []
-    for m in [llm.MODEL_SMALL, llm.MODEL_MID, llm.MODEL_BIG] + installed:
-        if m not in choices:
-            choices.append(m)
     return {
-        "ollama": up,
-        "ollama_installed": bool(llm.ollama_binary()),
-        "ram": round(llm.ram_gb()),
-        "model": model,
-        "model_ready": up and llm.has_model(model),
-        "models": choices,
-        "folder": str(inbox),
-        "watching": _env_flag("WATCH_ENABLED"),
-        "mail_mode": mailer.MAIL_MODE,
-        "recipients": mailer.split_addresses(os.getenv("RECIPIENTS", "")),
-        "files": files[:25],
-        "history": history,
-        "num_ctx": llm.NUM_CTX,
-        # Whatever the one worker is doing, whoever started it — so the window
-        # shows a file the watcher picked up as well as one chosen here.
+        "mail_mode": mailer.mail_mode(),
+        "recipients": mailer.split_addresses(paths.setting("RECIPIENTS")),
+        # Whatever the one worker is doing, whoever started it, so a meeting the
+        # watcher picked up is visible while another one is being read.
         "job": pipeline.WORKER.snapshot(),
     }
 
@@ -134,8 +84,6 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/state":
             return self._json(state())
-        if u.path == "/api/job":
-            return self._json(pipeline.WORKER.snapshot())
         if u.path == "/api/notes":
             p = Path(q["path"][0])
             return self._json(json.loads(p.read_text(encoding="utf-8")))
@@ -150,17 +98,6 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:
             return self._json({"error": f"bad request: {e}"}, 400)
 
-        if u.path == "/api/process":
-            # Chosen by hand, so the transcript check is skipped on purpose and
-            # the file stays where it is. Queued if the worker is busy.
-            return self._json(pipeline.WORKER.submit(body["path"]))
-
-        if u.path == "/api/ollama":
-            return self._json({"ok": llm.start_ollama(), "state": state()})
-
-        if u.path == "/api/pull":
-            return self._json(pipeline.WORKER.submit(body["model"], kind="pull"))
-
         if u.path == "/api/notes":
             p = Path(body["path"])
             p.write_text(json.dumps(body["data"], ensure_ascii=False, indent=2),
@@ -169,29 +106,13 @@ class Handler(BaseHTTPRequestHandler):
 
         if u.path == "/api/send":
             try:
-                msg = mailer.deliver(body["data"], body["recipients"])
-                return self._json({"ok": True, "message": msg})
+                message = mailer.deliver(body["data"], body["recipients"])
             except Exception as e:
                 return self._json({"ok": False, "error": str(e)})
-
-        if u.path == "/api/settings":
-            from menubar import save_setting
-            for key, value in body.items():
-                save_setting(key, str(value))
-            if "MAIL_MODE" in body:
-                mailer.MAIL_MODE = str(body["MAIL_MODE"])
-            if on_settings_changed:
-                on_settings_changed(body)
-            return self._json({"ok": True, "state": state()})
-
-        if u.path == "/api/choose":
-            from menubar import osa
-            kind = body.get("kind", "folder")
-            script = ('POSIX path of (choose folder with prompt "Where transcripts arrive")'
-                      if kind == "folder" else
-                      'POSIX path of (choose file with prompt "Choose a transcript" '
-                      'of type {"vtt", "docx"})')
-            return self._json({"path": osa(script)})
+            meeting = history.find_by_notes(body.get("path", ""))
+            if meeting:
+                history.mark_sent(meeting["hash"], body["recipients"])
+            return self._json({"ok": True, "message": message})
 
         return self._json({"error": "not found"}, 404)
 
