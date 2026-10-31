@@ -17,7 +17,7 @@ import shutil
 import sys
 from pathlib import Path
 
-from dotenv import dotenv_values, set_key, unset_key
+from dotenv import dotenv_values, set_key
 
 BUNDLED = bool(getattr(sys, "frozen", False))
 
@@ -34,9 +34,27 @@ DATA = Path(os.environ.get("MEETING_NOTES_DATA")
             ).expanduser()
 
 ENV_FILE = DATA / ".env"
-PEOPLE_FILE = DATA / "config" / "people.yaml"
 
 _values = {}
+
+# Every setting the app reads, and its value when neither the environment nor
+# .env gives one. .env.example documents exactly these keys; a test keeps the
+# two in step, so a knob cannot be documented and then quietly ignored.
+DEFAULTS = {
+    # folders and the watcher
+    "INBOX_DIR": "", "PROCESSED_DIR": "", "WATCH_ENABLED": "1",
+    "STABLE_SECONDS": 30, "POLL_SECONDS": 5, "SCAN_MAX_AGE_HOURS": 24,
+    # is this a transcript at all
+    "MIN_TURNS": 4, "MIN_CHARS": 400, "MIN_TURNS_PER_SPEAKER": 2.0, "MIN_NAME_RATIO": 0.6,
+    # Ollama
+    "OLLAMA_URL": "http://localhost:11434", "OLLAMA_MODEL": "",
+    "RAM_FOR_BIG": 24, "RAM_FOR_MID": 20, "NUM_CTX": 32768, "OLLAMA_RETRY_SECONDS": 15,
+    "TEMPERATURE": 0.2, "MAP_THRESHOLD_TOKENS": 6000, "CHUNK_TOKENS": 5000,
+    "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
+    # mail
+    "MAIL_MODE": "outlook_draft", "RECIPIENTS": "", "SMTP_USER": "",
+    "SMTP_HOST": "", "SMTP_PORT": 465, "SMTP_FROM": "",
+}
 
 
 # ---------------------------------------------------------------- settings
@@ -47,8 +65,8 @@ def reload():
     _values = dotenv_values(ENV_FILE) if ENV_FILE.exists() else {}
 
 
-def setting(key: str, default: str = "") -> str:
-    """The environment first, then .env, then the default.
+def setting(key: str) -> str:
+    """The environment first, then .env, then DEFAULTS.
 
     The environment wins so that a test or a one-off CLI run can point the app
     somewhere harmless without touching the user's own settings.
@@ -56,43 +74,30 @@ def setting(key: str, default: str = "") -> str:
     value = os.environ.get(key)
     if value is None:
         value = _values.get(key)
-    return default if value is None or value == "" else value
+    return str(DEFAULTS[key]) if value is None or value == "" else value
 
 
-def setting_int(key: str, default: int) -> int:
+def number(key: str) -> float:
+    """A numeric setting. Something unreadable in .env means the default."""
     try:
-        return int(float(setting(key, str(default))))
+        return float(setting(key))
     except ValueError:
-        return default
+        return float(DEFAULTS[key])
 
 
-def setting_float(key: str, default: float) -> float:
-    try:
-        return float(setting(key, str(default)))
-    except ValueError:
-        return default
-
-
-def flag(key: str, default: bool = True) -> bool:
-    return setting(key, "1" if default else "0").strip().lower() \
-        not in ("0", "false", "no", "off", "")
+def flag(key: str) -> bool:
+    return setting(key).strip().lower() not in ("0", "false", "no", "off", "")
 
 
 def save_setting(key: str, value: str):
     """Write one setting to .env and make it current for this process."""
+    if key not in DEFAULTS:
+        raise KeyError(f"unknown setting {key}")
     DATA.mkdir(parents=True, exist_ok=True)
     ENV_FILE.touch(exist_ok=True)
     set_key(str(ENV_FILE), key, value, quote_mode="auto")
     # An environment override would otherwise silently win over what was just
     # saved, and the menu would appear to ignore the change.
-    os.environ.pop(key, None)
-    reload()
-
-
-def remove_setting(key: str):
-    """Take a setting out of .env for good — how the SMTP password leaves it."""
-    if ENV_FILE.exists():
-        unset_key(str(ENV_FILE), key)
     os.environ.pop(key, None)
     reload()
 
@@ -137,13 +142,13 @@ def history_db() -> Path:
 def migrate(code: Path = None, data: Path = None) -> list:
     """Bring across whatever the data folder does not have yet.
 
-    Each of the three things is copied only when it is missing on the data side,
+    Each of the two things is copied only when it is missing on the data side,
     so this is safe on every start: nothing is overwritten, and nothing is ever
     removed from the code folder. In particular an existing `.env` is left exactly
     as it is — when there are two of them, which one wins is the user's decision,
     not this function's.
 
-    Returns lines for the log. Logging is not configured this early, and the
+    Called by main.init, never at import. Returns lines for the log; the
     contents of .env are nobody's business, so only names and counts are said.
     """
     code = code or CODE
@@ -166,12 +171,6 @@ def migrate(code: Path = None, data: Path = None) -> list:
                         encoding="utf-8")
                     done.append("settings: pointed INBOX_DIR at ~/Downloads")
 
-    people = code / "config" / "people.yaml"
-    if people.exists() and not (data / "config" / "people.yaml").exists():
-        _dir(data / "config")
-        shutil.copy(people, data / "config" / "people.yaml")
-        done.append(f"copied {people.name}")
-
     # Only ever on the very first run, so a meeting deleted here does not come
     # back from the code folder on the next start.
     old_notes = code / "processed"
@@ -186,5 +185,4 @@ def migrate(code: Path = None, data: Path = None) -> list:
     return done
 
 
-MIGRATED = migrate()
 reload()

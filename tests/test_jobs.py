@@ -14,7 +14,8 @@ import time
 import pytest
 
 import llm
-import main
+from pipeline import Job, read
+from watcher import Watcher
 from helpers import NOTES, live_observers, wait_until
 
 
@@ -69,7 +70,7 @@ def rec(monkeypatch):
 
 @pytest.fixture
 def watcher(box, worker):
-    w = main.Watcher()                   # the folder comes from paths
+    w = Watcher()                   # the folder comes from paths
     yield w
     w.stop()
 
@@ -123,11 +124,11 @@ def test_a_hand_picked_job_waits_instead_of_being_refused(box, rec, worker, tran
     first = transcript(box.inbox, "first.vtt")
     second = transcript(box.inbox, "second.vtt")
 
-    assert worker.submit(first)["queued"] is True
+    assert worker.submit(Job(transcript=read(first))) is True
     assert rec.entered.wait(15), "the first job never started"
 
-    queued = worker.submit(second)        # the worker is busy right now
-    assert queued == {"ok": True, "queued": True}
+    queued = worker.submit(Job(transcript=read(second)))   # the worker is busy right now
+    assert queued is True
     assert worker.snapshot()["queued"] == 1
     assert worker.snapshot()["active"] is True
     assert rec.started == ["first.vtt"], "the second job started too early"
@@ -138,3 +139,27 @@ def test_a_hand_picked_job_waits_instead_of_being_refused(box, rec, worker, tran
     assert rec.max_live == 1
     # Picked by hand: the files stay where they are.
     assert first.exists() and second.exists()
+
+
+def test_a_restart_during_a_slow_hand_off_leaves_one_sweeping_thread(box, transcript):
+    """The old loop used to pick up the new run's stop event and keep going."""
+    busy, release = threading.Event(), threading.Event()
+
+    def slow(path):
+        busy.set()
+        release.wait(15)
+
+    w = Watcher(on_file=slow)
+    transcript(box.inbox, "slow.vtt")
+    w.start()
+    try:
+        assert busy.wait(15), "the file was never handed on"
+        old = w.thread
+        w.start()                         # restart while the old loop is inside slow()
+        release.set()
+        old.join(5)
+        assert not old.is_alive(), "the old sweeping thread kept running"
+        assert [t for t in threading.enumerate() if t.name == "watcher"] == [w.thread]
+    finally:
+        release.set()
+        w.stop()

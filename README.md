@@ -52,7 +52,6 @@ the people every set of notes goes to.
 ```
 ~/Library/Application Support/Meeting Notes/
   .env               settings — the menu, the window and the CLI all write here
-  config/people.yaml
   processed/         the notes, one JSON per meeting
   history.db         every meeting it has seen, by fingerprint
   logs/pipeline.log
@@ -60,9 +59,9 @@ the people every set of notes goes to.
 
 **One data folder, always** — the built app, `./run.sh` and `python main.py`
 share it, so a setting changed in one is seen by the others and replacing the app
-with a newer build keeps everything. The first start copies `.env`,
-`config/people.yaml` and `processed/` out of the repo if they are there, and never
-deletes the originals.
+with a newer build keeps everything. The first start copies `.env` and
+`processed/` out of the repo if they are there, and never deletes the originals.
+Only start-up (`main.init()`) writes there; importing a module never does.
 
 `MEETING_NOTES_DATA=/some/where` moves the whole folder, which is how the tests
 and an experimental run stay away from the real one:
@@ -159,15 +158,18 @@ menubar.py   the status bar item, the owner of everything
  ├ server.py  a loopback HTTP API on a random port, gated by a startup token
  ├ window.py  an NSWindow with a WKWebView pointed at that API
  └ ui/        the page itself — plain HTML and JavaScript, no framework
-main.py      watcher, queue and CLI   parser.py  .vtt/.docx into speaker turns
+pipeline.py  decide, summarise, queue watcher.py  stable files in one folder
+main.py      start-up and the CLI     parser.py  .vtt/.docx into speaker turns
 llm.py       Ollama, map-reduce       mailer.py  Jinja2, Outlook, SMTP
 history.py   what it has seen         menu.py    the dropdown, as data
-paths.py     folders and settings
+paths.py     folders, settings and their defaults
 ```
 
 The UI is served from `127.0.0.1` on a port the OS assigns, and every API call
 carries a token generated at startup, so nothing else on the machine can drive
-the pipeline through it.
+the pipeline through it. A request with any other Host header is refused. The
+API names a meeting by its hash (`/api/meeting/<hash>`, `…/send`); no file path
+ever comes in from the page.
 
 ## The menu bar app
 
@@ -186,7 +188,7 @@ Recent meetings ▸  ✓ Sprint review — 23 Sep
 Process a file…
 ✓ Watch the folder
 ────────────────────────────────────
-Settings ▸  Folder… / Model ▸ / Mail ▸ / Default recipients…
+Settings ▸  Folder… / Model ▸ / Mail ▸ / Mail account… / Default recipients…
 ────────────────────────────────────
 Quit
 ```
@@ -200,7 +202,8 @@ Quit
 - **Process a file…** picks a transcript by hand. It skips the is-it-a-transcript
   check, because you chose it, and joins the same queue as anything the watcher
   finds, so it waits its turn rather than being refused. A meeting that has been
-  summarised before opens its notes instead of being summarised again;
+  summarised before opens its notes instead of being summarised again, and one
+  that failed or was skipped is summarised now;
 - **Watch the folder** is the on/off switch. Off, the icon turns into the same
   page with a line struck through it, so the menu bar says at a glance whether
   anything is running. A job already in progress is left to finish;
@@ -239,10 +242,6 @@ other provider, `SMTP_HOST`, `SMTP_PORT` and `SMTP_FROM` in `.env` are the way t
 say so; they are deliberately not in the menu. Without a host, nothing is tried
 and the error says which setting is missing.
 
-If an older `.env` still has `SMTP_PASSWORD` in it, it keeps working as a
-fallback, and the app offers **once** to move it into the Keychain and take it out
-of the file.
-
 ## Where transcripts come from
 
 Teams hands the transcript over as a download, so it lands in `~/Downloads`.
@@ -258,6 +257,9 @@ for weeks is left alone. Files that arrive later are always picked up.
 subtitles for a film — and most `.docx` files are just documents. Before any
 model time is spent, `parser.looks_like_transcript()` checks three things:
 
+A speech-to-text export with no speakers at all (`[start - end] text`) is
+recognised by its shape and only has to be long enough. Anything else:
+
 1. *Somebody is speaking.* Subtitles carry no speaker tags and a document has no
    speaker headings, so both collapse into a single `Unknown` turn.
 2. *Speakers recur.* A conversation alternates between a few people. A document
@@ -271,15 +273,20 @@ A file that fails is **left exactly where it is** — never moved, never deleted
 It belongs to someone else. The reason goes to `logs/pipeline.log`, and
 `--parse-only` prints the same verdict.
 
-Thresholds: `MIN_TURNS`, `MIN_CHARS`, `MIN_TURNS_PER_SPEAKER`, `MIN_NAME_RATIO`.
+Thresholds: `MIN_TURNS`, `MIN_CHARS`, `MIN_TURNS_PER_SPEAKER`, `MIN_NAME_RATIO`,
+read from `.env` each time the check runs.
 Picking a file by hand — in the editor or via **Process a file…** — skips the
 check entirely, because the choice was explicit.
 
 ## How it works
 
-1. **Parsing** (`parser.py`) — timecodes, cue identifiers and header lines are
-   stripped from `.vtt` and `.docx`; consecutive turns by the same speaker are
-   joined into `Speaker: text`. The model understands "Maria said this, whole"
+1. **Parsing** (`parser.py`) — the file's shape is decided first: Teams `.vtt`
+   (current or old timecodes), current Teams `.docx` (a header, then
+   `Name   0:03` headings), old Teams `.docx` (timecode, name and text in one
+   paragraph), a speech-to-text export with no speakers, or plain `Name: text`
+   lines. Timecodes, cue identifiers and headers are stripped; consecutive turns
+   by the same speaker are joined into `Speaker: text`. With no speakers, the
+   model is told so and only names spoken in the text become owners. The model understands "Maria said this, whole"
    far better than twenty fragments, and it costs fewer tokens.
 2. **The model** (`llm.py`) — Ollama `/api/generate`, `num_ctx=32768`,
    `temperature=0.2`, the JSON schema passed in `format` so generation is
@@ -292,8 +299,8 @@ check entirely, because the choice was explicit.
 3. **The email** (`mailer.py`) — Jinja2 over `templates/email.html`.
    `MAIL_MODE=outlook_draft` creates a draft in Outlook for Mac through
    `osascript` and does not send it; `MAIL_MODE=smtp` sends through SMTP with an
-   app password (see *The mail account*). Recipients: `RECIPIENTS` from `.env` plus participants
-   matched in `config/people.yaml`. Both take a bare address or
+   app password (see *The mail account*). Recipients: `RECIPIENTS` from `.env` and whatever is typed in the window. Both
+   take a bare address or
    `Name <address@example.com>`, separated by commas or semicolons, deduplicated
    by address.
 
@@ -340,8 +347,8 @@ and diff the result over the same transcript.
 ### The history
 
 `history.db` (sqlite) is the memory of what the app has seen. A meeting is keyed
-by a **fingerprint**: the sha256 of its parsed turns — speaker and text,
-whitespace collapsed, lower case — not of the bytes of the file. The same
+by a **fingerprint**: the sha256 of its parsed turns — speaker and words, lower
+case, punctuation and whitespace collapsed — not of the bytes of the file. The same
 conversation as `.docx` and as `.vtt`, or `Meeting.docx` and `Meeting (1).docx`,
 is one meeting and is summarised once.
 
@@ -352,11 +359,14 @@ is `skipped`, which is only there so the watcher stops reconsidering it.
 
 **Transcripts are never moved, renamed or rewritten.** The app reads them where
 they are and the history remembers them, so your Downloads folder is left exactly
-as it was. A meeting that failed can be tried again from the history — *Try
-again* in the window — and `--once --force` summarises a known meeting afresh.
+as it was. A meeting that failed can be tried again with **Reprocess** in the menu, or by
+picking its file with **Process a file…**; `--once --force` summarises a known
+meeting afresh.
 
 If Ollama is not running when a job comes up, the job **waits** for it instead of
-failing, and starts as soon as it answers (`OLLAMA_RETRY_SECONDS`).
+failing, and starts as soon as it answers (`OLLAMA_RETRY_SECONDS`). A meeting
+left `found` or `processing` by a quit or a crash is queued again at start-up.
+The queue holds a meeting once, however many files it arrived in.
 
 ## Tests
 
@@ -364,13 +374,16 @@ failing, and starts as soon as it answers (`OLLAMA_RETRY_SECONDS`).
 .venv/bin/python -m pytest -q
 ```
 
-`tests/test_parser.py` has twelve fixtures. Eight that must be accepted: classic Teams VTT with GUID cue
-identifiers, VTT without the closing `</v>`, VTT with an `X-TIMESTAMP-MAP` and
-`NOTE` header, a turn split across consecutive cues, a guest suffix, flat
-`Name: text`, and `.docx` with tab and with space separators. Four that must be
-rejected: film subtitles, a report, a meeting agenda and plain prose. Beside it,
+`tests/test_parser.py` has eleven fixtures that must be accepted: classic Teams
+VTT with GUID cue identifiers, VTT without the closing `</v>`, VTT with an
+`X-TIMESTAMP-MAP` and `NOTE` header, a turn split across consecutive cues, a
+guest suffix, flat `Name: text`, `.docx` with tab and with space separators, old
+Teams VTT, old Teams `.docx`, and a current Teams `.docx` with its header. Four
+must be rejected: film subtitles, a report, a meeting agenda and plain prose.
+More tests cover a speech-to-text export and what counts as a name. Beside it,
 `test_jobs.py` covers the queue and the watcher, `test_history.py` the
-fingerprint and the history flow, and `test_paths.py` the data folder.
+fingerprint and the history flow, `test_server.py` the window's API, and
+`test_paths.py` the data folder and the settings.
 
 If a transcript ever parses wrong, add its shape to `tests/test_parser.py` and fix the
 regexes in `parser.py` until the suite is green again.
@@ -442,7 +455,8 @@ Use the venv's Python, not the system one, or the dependencies will not be found
 
 ## Notes on the build
 
-The app is signed ad-hoc (`codesign --sign -`), which is enough for it to keep
+The app is signed ad-hoc (`codesign --sign -`); a failed signature stops the
+build (the log is `build/py2app.log`). That is enough for it to keep
 its Automation and notification permissions between launches on your own machine.
 It is **not** notarised, so on someone else's Mac Gatekeeper will object on first
 open — right-click the app and choose Open, once.
@@ -453,10 +467,11 @@ Rebuilding is safe: user data lives in Application Support, not in the bundle.
 
 ```
 menubar.py  menu.py  server.py  window.py  ui/   the app: icon, dropdown, API, window, page
-main.py     parser.py  llm.py     mailer.py   the pipeline, watcher and queue
+pipeline.py watcher.py parser.py llm.py mailer.py   the pipeline, watcher and queue
+main.py                           start-up and the CLI
 history.py                        meetings by fingerprint (sqlite)
 paths.py                          code and data folders, and the settings
-prompts/    templates/ config/    the bits you are meant to edit
+prompts/    templates/            the bits you are meant to edit
 assets/     make_icon.py          icons, drawn at build time
 examples/                         a sample transcript and its notes
 build.sh    setup.py              produces Meeting Notes.app

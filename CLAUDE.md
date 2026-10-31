@@ -26,31 +26,58 @@ Exception: files, code comments, commit messages, docs and log notes are written
 sentence case, plain and clear. The style above applies only to chat replies.
 
 ## Project
-Transcript pipeline ("Meeting Notes"): a macOS menu bar app in Python 3.11.
-A Teams transcript (.vtt / .docx) lands in a watched folder, a local Ollama model turns it
-into structured notes (JSON), the user reviews them in a window and sends the email.
+Meeting Notes: a macOS menu bar app in Python 3.11. It gets a meeting transcript, turns it
+into structured notes (JSON) with a local Ollama model, and emails them after I review them.
+Semi-automatic on purpose: nothing is ever sent without my click.
 
-- `menubar.py` — rumps status bar app, owns the watcher thread, the server and the window.
-- `server.py` — loopback HTTP API + token; `window.py` — NSWindow/WKWebView; `ui/index.html`.
-- `main.py` — watcher (watchdog) and CLI; `parser.py` — transcript → speaker turns;
-  `llm.py` — Ollama, map-reduce, JSON schema; `mailer.py` — Jinja2, Outlook draft, SMTP.
-- `paths.py` — code dir vs data dir. From source both are the repo; in a built .app data
-  lives in `~/Library/Application Support/Meeting Notes/`.
+How a transcript flows:
+watcher sees a stable `.vtt` / `.docx` → `parser.py` turns it into turns (speaker, text) and
+checks it is a meeting → fingerprint of the turns → `history.db` (already seen? skip) → one
+worker queue → `llm.py` → notes JSON → review window → `mailer.py` sends.
+
+Files:
+- `menubar.py` — rumps app: the dropdown, the watcher, the server and the window. `menu.py` —
+  the dropdown as plain data (`tree()`), tested without rumps.
+- `main.py` — `Watcher` (only detects files), `Worker` (the only thing that runs the model, one
+  job at a time), `register()` (parse, fingerprint, decide), and the CLI.
+- `parser.py` — `.vtt` / `.docx` → turns; `looks_like_transcript()`.
+- `history.py` — sqlite `history.db`: fingerprint, source, status (found → processing → ready →
+  sent, or failed / skipped), notes path, recipients.
+- `llm.py` — Ollama, map-reduce for long meetings, JSON schema. Prompts in `prompts/`.
+- `mailer.py` — Jinja2 email (`templates/`), Gmail SMTP or Outlook draft; mail password in the
+  macOS Keychain via `keyring`.
+- `server.py` + `window.py` + `ui/index.html` — the review window (loopback API with a token).
+- `paths.py` — the only place that knows folders and settings. Data always lives in
+  `~/Library/Application Support/Meeting Notes/` (`.env`, `history.db`, `processed/`, `logs/`),
+  overridable with `MEETING_NOTES_DATA`.
 
 I use it as the built `Meeting Notes.app` (`./build.sh`). `./run.sh` is the developer's way to
-run from source. Never `./build.sh --install` without asking.
+run from source; it uses the same data folder. Never `./build.sh --install` without asking.
 
 The UI is the menu bar dropdown (native rumps menu). Keep its look; it is a widget, not a full app.
 The window opens only to review and send one meeting's notes.
+
+Where things stand:
+- `CHANGELOG.md` says what each version changed. Read the top entries before starting.
+- My project note (context, plans, open problems; read only):
+  /Users/vellow13/Documents/Recto Vault/Programming/Projects/Trasncript.md
+- Parser work from v0.3.1 (old Teams formats, current Teams `.docx`, speakerless transcripts)
+  was lost and is NOT in this repo yet: `parser.py` is still the v0.1 parser. Don't assume
+  those formats work.
+- Planned main feature: recording a call (microphone + system audio through a Core Audio tap),
+  transcribing it locally, and feeding the turns into the same pipeline. Not started. Don't
+  build towards it unless the task says so.
 
 Checks before saying something is done:
 - `.venv/bin/python -m pytest -q`
 - `.venv/bin/ruff check .`
 - anything touching the parser: also `.venv/bin/python main.py --parse-only examples/sample-meeting-ru.vtt`
 - anything touching the LLM path: one real run `main.py --once examples/sample-meeting-ru.vtt`
-  with a temp `PROCESSED_DIR`, only if Ollama is up and the model is already pulled.
+  with `MEETING_NOTES_DATA` pointing at a temp folder, only if Ollama is up and the model is
+  already pulled.
+- anything touching packaging (`setup.py`, new dependencies): `./build.sh`, then confirm the app
+  starts and `codesign -dv "dist/Meeting Notes.app"` shows a signature.
 - UI or menu bar changes can't be verified headless: say exactly what I need to click to check.
-
 
 ---
 
@@ -59,8 +86,12 @@ Checks before saying something is done:
   (`~/Library/Application Support/Meeting Notes`). Use a temp dir via `MEETING_NOTES_DATA`
   (the whole data folder), `INBOX_DIR` and `PROCESSED_DIR`. Never move or delete my files.
 - Never send real email. Tests mock `smtplib` and `osascript`. Don't call `mailer.deliver`
-  outside a test, don't create Outlook drafts.
-- Never read, print or log `.env` — it holds the SMTP password. Use `.env.example`.
+  outside a test, don't create Outlook drafts, don't press "Send test email" for me.
+- Never read, print or log `.env` or a mail password, and never read or write the real Keychain
+  item "Meeting Notes". Tests mock `keyring`. Use `.env.example`.
+- Test transcripts live outside the repo; I'll give you the path when a task needs them. Some
+  are real client conversations: use only verdicts and counts from them, never their text, and
+  never copy them into the repo.
 - Don't `ollama pull` anything (several GB) and don't run `build.sh --install` without asking.
 - Don't kill my running app (`run.sh` does `pkill -f menubar.py`) — ask first.
 
@@ -74,21 +105,21 @@ Checks before saying something is done:
 - When a feature is ready, tell me and suggest a commit message. Remind me if a finished branch
   hasn't been deleted.
 - Commit messages: `v0.MINOR.PATCH: what changed`. MINOR = feature or substantial change,
-  PATCH = fix or small change
+  PATCH = fix or small change.
+- Work left staged but uncommitted is lost if I switch machines. When you finish, say clearly
+  that the branch still needs my commit and push.
 
 ---
 
-## Project log
-Never create log, draft or report files inside the repo.
-Write the log only to: /Users/veterba/Documents/Notes/Recto-vault/Programming/Projects/Transcript/Transcript log/
-- One note per version: `YYYY-MM-DD — v0.X.Y.md` (em dash with spaces).
-- Format: frontmatter `tags: [log]`, then `## YYYY-MM-DD — <short title>`, then the entry.
-- Add every new note to the list at the end of `Transcript log.md` in that folder:
-  `- [[Transcript log/YYYY-MM-DD — v0.X.Y|YYYY-MM-DD — v0.X.Y]]`.
-- Only create a new note, append to the current version's note, or add it to that list.
-  Never touch anything else in the vault.
-- Entry content: what changed and why, what was tested and how, what is still broken or
-  unverified. No marketing tone.
+## Changelog and notes
+- `CHANGELOG.md` in the repo root is the only record of what changed. Every branch adds its entry
+  at the top, as `## v0.X.Y — YYYY-MM-DD`, matching the commit message you suggest. 3–6 lines
+  under Added / Changed / Removed / Fixed: what a user or developer will notice. No test logs, no
+  reasoning.
+- The reasons go into the commit message you suggest: the `v0.X.Y: …` line, then 2–4 lines of why.
+- What you tested, how, and what is still broken or unverified goes into your final report to
+  me in chat, not into a file.
+- Never create other log, draft or report files in the repo, and never write to my notes vault.
 
 ---
 

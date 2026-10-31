@@ -16,22 +16,12 @@ UNREACHABLE = requests.exceptions.ConnectionError
 
 # Settings are read when they are used, not at import: the model or the Ollama
 # address can change in the menu while the app is running.
-DEFAULTS = {"OLLAMA_URL": "http://localhost:11434", "NUM_CTX": 32768,
-            "TEMPERATURE": 0.2, "CHUNK_TOKENS": 5000, "MAP_THRESHOLD_TOKENS": 6000,
-            "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
-            "RAM_FOR_BIG": 24, "RAM_FOR_MID": 20}
-
-
 def url() -> str:
-    return paths.setting("OLLAMA_URL", DEFAULTS["OLLAMA_URL"]).rstrip("/")
-
-
-def num(key: str) -> float:
-    return paths.setting_float(key, DEFAULTS[key])
+    return paths.setting("OLLAMA_URL").rstrip("/")
 
 
 def timeout() -> int:
-    return int(num("REQUEST_TIMEOUT"))
+    return int(paths.number("REQUEST_TIMEOUT"))
 
 
 # The threshold is not the size of the model file but weights plus the KV cache
@@ -42,6 +32,16 @@ def timeout() -> int:
 MODEL_BIG = "qwen3:30b-a3b"      # 24 GB and up
 MODEL_MID = "qwen3:14b"          # 20 GB and up
 MODEL_SMALL = "qwen3.5:9b"       # below 20 GB
+ACTION_ITEM = {
+    "type": "object",
+    "properties": {
+        "owner": {"type": "string"},
+        "task": {"type": "string"},
+        "deadline": {"type": ["string", "null"]},
+    },
+    "required": ["owner", "task", "deadline"],
+}
+
 SUMMARY_SCHEMA = {
     "type": "object",
     "properties": {
@@ -50,18 +50,7 @@ SUMMARY_SCHEMA = {
         "participants": {"type": "array", "items": {"type": "string"}},
         "summary": {"type": "string"},
         "decisions": {"type": "array", "items": {"type": "string"}},
-        "action_items": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "owner": {"type": "string"},
-                    "task": {"type": "string"},
-                    "deadline": {"type": ["string", "null"]},
-                },
-                "required": ["owner", "task", "deadline"],
-            },
-        },
+        "action_items": {"type": "array", "items": ACTION_ITEM},
         "assumptions": {
             "type": "array",
             "items": {
@@ -87,18 +76,7 @@ MAP_SCHEMA = {
     "properties": {
         "facts": {"type": "array", "items": {"type": "string"}},
         "decisions": {"type": "array", "items": {"type": "string"}},
-        "action_items": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "owner": {"type": "string"},
-                    "task": {"type": "string"},
-                    "deadline": {"type": ["string", "null"]},
-                },
-                "required": ["owner", "task", "deadline"],
-            },
-        },
+        "action_items": {"type": "array", "items": ACTION_ITEM},
         "quotes": {"type": "array", "items": {"type": "string"}},
         "open_questions": {"type": "array", "items": {"type": "string"}},
     },
@@ -121,9 +99,9 @@ def default_model() -> str:
     if chosen:
         return chosen
     ram = ram_gb()
-    if ram >= num("RAM_FOR_BIG"):
+    if ram >= paths.number("RAM_FOR_BIG"):
         return MODEL_BIG
-    if ram >= num("RAM_FOR_MID"):
+    if ram >= paths.number("RAM_FOR_MID"):
         return MODEL_MID
     return MODEL_SMALL
 
@@ -173,9 +151,19 @@ def installed_models() -> list:
         return []
 
 
-def has_model(name: str) -> bool:
-    models = installed_models()
+def has_model(name: str, installed: list = None) -> bool:
+    """Is the model downloaded? Ollama lists a bare name with ":latest" added."""
+    models = installed_models() if installed is None else installed
     return name in models or f"{name}:latest" in models
+
+
+def model_choices(installed: list) -> list:
+    """What the menu offers: the current model, the three sizes, then the rest."""
+    choices = []
+    for name in [default_model(), MODEL_SMALL, MODEL_MID, MODEL_BIG] + installed:
+        if name and name not in choices:
+            choices.append(name)
+    return choices
 
 
 def pull_model(name: str, progress_cb=None):
@@ -245,7 +233,8 @@ def generate_json(prompt: str, schema: dict, model: str) -> dict:
         "stream": False,
         "format": schema,
         "think": False,
-        "options": {"num_ctx": int(num("NUM_CTX")), "temperature": num("TEMPERATURE")},
+        "options": {"num_ctx": int(paths.number("NUM_CTX")),
+                    "temperature": paths.number("TEMPERATURE")},
     }
     endpoint, limit = f"{url()}/api/generate", timeout()
     last_err = None
@@ -281,8 +270,8 @@ def chunk_turns(turns, max_tokens=None, overlap=None):
     invents meaning to fill the gap. The overlap keeps a decision voiced across
     a chunk boundary from falling between two chunks.
     """
-    max_tokens = int(max_tokens if max_tokens is not None else num("CHUNK_TOKENS"))
-    overlap = int(overlap if overlap is not None else num("OVERLAP_TURNS"))
+    max_tokens = int(max_tokens if max_tokens is not None else paths.number("CHUNK_TOKENS"))
+    overlap = int(overlap if overlap is not None else paths.number("OVERLAP_TURNS"))
     chunks, cur, cur_tokens = [], [], 0
     for turn in turns:
         t = estimate_tokens(f"{turn[0]}: {turn[1]}")
@@ -311,19 +300,23 @@ def _prompt(name: str, **vars_) -> str:
 
 def summarize(turns, meta: dict, model: str = None, progress_cb=None) -> dict:
     """Turns -> the final JSON described by SUMMARY_SCHEMA."""
-    from parser import to_text, speakers
+    from parser import UNKNOWN, speakers, to_text
 
     model = model or default_model()
     full = to_text(turns)
+    named = [s for s in speakers(turns) if s != UNKNOWN]
+    who = (", ".join(named) if meta.get("named", True) else
+           "not named in this transcript. An owner is only a name spoken in the "
+           "text; when nobody is named for a task, leave the owner empty.")
     meta_line = (f"File: {meta.get('source', '')}\n"
                  f"File date: {meta.get('date', '')}\n"
-                 f"Speakers: {', '.join(speakers(turns))}")
+                 f"Speakers: {who}")
 
     def report(stage, i=0, n=0):
         if progress_cb:
             progress_cb(stage, i, n)
 
-    if estimate_tokens(full) <= num("MAP_THRESHOLD_TOKENS"):
+    if estimate_tokens(full) <= paths.number("MAP_THRESHOLD_TOKENS"):
         report("reduce", 1, 1)
         result = generate_json(
             _prompt("reduce", META=meta_line, NOTES="", TRANSCRIPT=full), SUMMARY_SCHEMA, model)
@@ -343,7 +336,7 @@ def summarize(turns, meta: dict, model: str = None, progress_cb=None) -> dict:
                     TRANSCRIPT=""), SUMMARY_SCHEMA, model)
 
     if not result.get("participants"):
-        result["participants"] = speakers(turns)
+        result["participants"] = named
     if not result.get("date"):
         result["date"] = meta.get("date", "")
     if not result.get("title"):

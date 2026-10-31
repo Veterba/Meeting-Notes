@@ -1,8 +1,8 @@
 """Keep the tests away from the real data folder.
 
 paths.DATA is read when paths is imported, so MEETING_NOTES_DATA has to be set
-before any test imports anything. A .env is written into that folder too, so the
-first-start migration has nothing to copy and never touches the real settings.
+before any test imports anything. A .env is written into that folder too, so a
+test that runs main.init has nothing to copy and never touches the real settings.
 
 Folders and timings for one test are set with monkeypatch.setenv, which
 paths.setting reads ahead of .env.
@@ -20,7 +20,7 @@ from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
-import main  # noqa: E402
+import pipeline  # noqa: E402
 import paths  # noqa: E402
 from helpers import write_transcript  # noqa: E402
 
@@ -54,7 +54,7 @@ def temp_env(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path)
     monkeypatch.setattr(paths, "ENV_FILE", tmp_path / ".env")
     (tmp_path / ".env").write_text("", encoding="utf-8")
-    for key in ("MAIL_MODE", "SMTP_USER", "SMTP_PASSWORD", "SMTP_HOST",
+    for key in ("MAIL_MODE", "SMTP_USER", "SMTP_HOST",
                 "SMTP_PORT", "SMTP_FROM", "RECIPIENTS"):
         monkeypatch.delenv(key, raising=False)
     paths.reload()
@@ -67,10 +67,10 @@ def temp_env(tmp_path, monkeypatch):
 def worker(monkeypatch):
     """A worker of this test's own, in place of the module-wide one.
 
-    main.submit reads main.WORKER when it is called, so patching the module
+    pipeline.submit reads pipeline.WORKER when it is called, so patching the module
     attribute leaves the real wiring in place.
     """
-    w = main.Worker()
-    monkeypatch.setattr(main, "WORKER", w)
+    w = pipeline.Worker()
+    monkeypatch.setattr(pipeline, "WORKER", w)
     yield w
     w.stop(timeout=15)

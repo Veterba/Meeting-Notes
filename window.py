@@ -3,8 +3,6 @@
 A WKWebView pointed at the loopback server. No browser, no Streamlit — the page
 and the API both live inside this process.
 """
-from urllib.parse import quote
-
 from AppKit import (NSApp, NSBackingStoreBuffered, NSMakeRect, NSScreen, NSWindow,
                     NSWindowStyleMaskClosable, NSWindowStyleMaskMiniaturizable,
                     NSWindowStyleMaskResizable, NSWindowStyleMaskTitled)
@@ -45,18 +43,19 @@ class AppWindow:
         self.webview.setAutoresizingMask_(1 << 1 | 1 << 4)   # width | height
         self.window.setContentView_(self.webview)
 
-    def show(self, open_path: str = None):
+    def show(self, meeting: str = None):
+        """Bring the window up, on one meeting's notes if one is named by hash."""
         fresh = self.window is None
         if fresh:
             self._build()
-        if fresh or open_path or not self.window.isVisible():
-            self.load(open_path)             # reopened: start from fresh state
+        if fresh or meeting or not self.window.isVisible():
+            self.load(meeting)               # reopened: start from fresh state
         self.window.makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
 
-    def load(self, open_path: str = None):
+    def load(self, meeting: str = None):
         url = self.url
-        if open_path:
-            url += "?open=" + quote(str(open_path), safe="")
+        if meeting:
+            url += "?meeting=" + meeting
         request = NSURLRequest.requestWithURL_(NSURL.URLWithString_(url))
         self.webview.loadRequest_(request)

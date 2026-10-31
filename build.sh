@@ -24,16 +24,21 @@ say "Drawing the icons"
 
 say "Building the app"
 rm -rf build dist
-"$PY" setup.py py2app >/tmp/meeting-notes-build.log 2>&1 || {
-  echo "Build failed. Last lines of /tmp/meeting-notes-build.log:"; tail -30 /tmp/meeting-notes-build.log; exit 1; }
+mkdir build
+LOG=build/py2app.log
+"$PY" setup.py py2app >"$LOG" 2>&1 || {
+  echo "Build failed. Last lines of $LOG:"; tail -30 "$LOG"; exit 1; }
 
 APP="dist/Meeting Notes.app"
-[ -d "$APP" ] || { echo "No app produced; see /tmp/meeting-notes-build.log"; exit 1; }
+[ -d "$APP" ] || { echo "No app produced; see $LOG"; exit 1; }
 
 # Ad-hoc signature, so macOS keeps the app's permissions between launches
 # instead of asking about Outlook and notifications every single time.
 say "Signing (ad-hoc)"
-codesign --force --deep --sign - "$APP" 2>/dev/null || say "codesign skipped"
+# An unsigned app loses its Keychain and Outlook permissions, so a failure here
+# stops the build instead of producing an app that half works.
+codesign --force --deep --sign - "$APP" || { echo "codesign failed"; exit 1; }
+codesign --verify --deep --strict "$APP" || { echo "the signature does not verify"; exit 1; }
 
 say "Built: $APP  ($(du -sh "$APP" | cut -f1))"
 

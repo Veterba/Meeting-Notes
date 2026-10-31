@@ -116,7 +116,6 @@ def test_saving_the_account_puts_the_password_in_the_keychain_only(temp_env, key
     assert "SMTP_USER" in settings
     assert ADDRESS in settings
     assert SECRET not in settings
-    assert "SMTP_PASSWORD" not in settings
     assert keychain.store == {(mailer.KEYCHAIN_SERVICE, ADDRESS): SECRET}
     assert mailer.password(ADDRESS) == SECRET
     # Saving an account is also saying "send over SMTP".
@@ -142,30 +141,12 @@ def test_a_new_address_with_no_password_anywhere_is_refused(temp_env):
     assert "no password saved" in mailer.save_account(ADDRESS, "")
 
 
-def test_the_keychain_comes_before_the_env_fallback(temp_env, keychain, monkeypatch):
+def test_a_missing_keyring_means_no_password_instead_of_breaking(temp_env, monkeypatch):
+    monkeypatch.setattr(mailer, "_KEYRING", False)      # not usable here
     paths.save_setting("SMTP_USER", ADDRESS)
-    paths.save_setting("SMTP_PASSWORD", "the-old-one-from-env")
 
-    assert mailer.password() == "the-old-one-from-env"      # the fallback
-    assert mailer.password_in_env() is True
-
-    keychain.store[(mailer.KEYCHAIN_SERVICE, ADDRESS)] = SECRET
-    assert mailer.password() == SECRET                      # the Keychain wins
-
-
-def test_an_old_env_password_can_be_moved_into_the_keychain(temp_env, keychain):
-    paths.save_setting("SMTP_USER", ADDRESS)
-    paths.save_setting("SMTP_PASSWORD", SECRET)
-    assert SECRET in temp_env.read_text(encoding="utf-8")
-
-    assert mailer.move_password_to_keychain() == ""
-
-    settings = temp_env.read_text(encoding="utf-8")
-    assert SECRET not in settings
-    assert "SMTP_PASSWORD" not in settings
-    assert keychain.store == {(mailer.KEYCHAIN_SERVICE, ADDRESS): SECRET}
-    assert mailer.password() == SECRET                      # still works
-    assert mailer.password_in_env() is False
+    assert mailer.password() == ""
+    assert "Keychain" in mailer.save_account(ADDRESS, SECRET)
 
 
 def test_nothing_is_lost_when_the_keychain_cannot_be_written_to(temp_env, keychain):
@@ -177,16 +158,6 @@ def test_nothing_is_lost_when_the_keychain_cannot_be_written_to(temp_env, keycha
     assert mailer.account() == ""                 # not half-saved
     assert mailer.mail_mode() == "outlook_draft"
     assert SECRET not in temp_env.read_text(encoding="utf-8")
-
-
-def test_a_missing_keyring_falls_back_to_env_instead_of_breaking(temp_env, monkeypatch):
-    monkeypatch.setattr(mailer, "_KEYRING", False)      # not usable here
-    paths.save_setting("SMTP_USER", ADDRESS)
-    paths.save_setting("SMTP_PASSWORD", "the-old-one-from-env")
-
-    assert mailer.keychain_password(ADDRESS) == ""
-    assert mailer.password() == "the-old-one-from-env"
-    assert "Keychain" in mailer.save_account(ADDRESS, SECRET)
 
 
 # ---------------------------------------------------------------- the test email
@@ -262,8 +233,6 @@ def test_the_password_is_never_logged(temp_env, keychain, smtp, caplog):
     with caplog.at_level(logging.DEBUG, logger="pipeline"):
         mailer.save_account(ADDRESS, SECRET)
         mailer.send_test(ADDRESS, SECRET)
-        paths.save_setting("SMTP_PASSWORD", SECRET)
-        mailer.move_password_to_keychain()
 
     assert SECRET not in caplog.text
     assert ADDRESS in caplog.text          # the address itself is not a secret

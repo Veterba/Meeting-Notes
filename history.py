@@ -11,6 +11,7 @@ shared between threads.
 """
 import hashlib
 import json
+import re
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
@@ -25,7 +26,6 @@ import paths
 #   sent       the email went out (or the draft was created)
 #   failed     something broke; the error text is in the row
 #   skipped    parsed, but not a meeting transcript — left alone on purpose
-TERMINAL = ("ready", "sent", "failed", "skipped")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meetings (
@@ -45,12 +45,15 @@ CREATE TABLE IF NOT EXISTS meetings (
 def fingerprint(turns) -> str:
     """sha256 of the conversation itself, not of the bytes of the file.
 
-    Speaker and text, whitespace collapsed, lower case. The same meeting in two
-    formats parses to the same turns and so to the same hash; two different
-    meetings never collide.
+    Speaker and words only: lower case, punctuation and whitespace collapsed. A
+    .vtt splits a sentence across cues that the parser joins with a full stop,
+    while the .docx of the same meeting has it whole; only the words agree. Two
+    different meetings never collide.
     """
-    lines = (f"{' '.join(str(speaker).split()).lower()}: "
-             f"{' '.join(str(text).split()).lower()}" for speaker, text in turns)
+    def words(s) -> str:
+        return " ".join(re.sub(r"[\W_]+", " ", str(s).lower()).split())
+
+    lines = (f"{words(speaker)}: {words(text)}" for speaker, text in turns)
     return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
 
 
@@ -73,14 +76,6 @@ def _now() -> str:
 def find(meeting: str) -> dict:
     with _db() as conn:
         row = conn.execute("SELECT * FROM meetings WHERE hash = ?", (meeting,)).fetchone()
-    return dict(row) if row else None
-
-
-def find_by_notes(notes_path: str) -> dict:
-    """Which meeting a notes file belongs to — all the window knows is the path."""
-    with _db() as conn:
-        row = conn.execute("SELECT * FROM meetings WHERE notes = ? ORDER BY found_at DESC",
-                           (str(notes_path),)).fetchone()
     return dict(row) if row else None
 
 
@@ -135,6 +130,14 @@ def listing(limit: int = 25) -> list:
                       "status": row["status"], "notes": row["notes"] or "",
                       "source": row["source"], "error": row["error"] or ""})
     return items
+
+
+def unfinished() -> list:
+    """Meetings found or being processed: what a quit or a crash left half done."""
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM meetings WHERE status IN ('found', 'processing') "
+                            "ORDER BY found_at, rowid").fetchall()
+    return [dict(r) for r in rows]
 
 
 def recent(limit: int = 25) -> list:

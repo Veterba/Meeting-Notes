@@ -13,28 +13,26 @@ import tempfile
 from email.message import EmailMessage
 from email.utils import getaddresses, parseaddr
 
-import yaml
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 import paths
-from paths import CODE, PEOPLE_FILE
 
 log = logging.getLogger("pipeline")
 
-_env = Environment(loader=FileSystemLoader(CODE / "templates"),
+_env = Environment(loader=FileSystemLoader(paths.CODE / "templates"),
                    autoescape=select_autoescape(["html"]))
 
 KEYCHAIN_SERVICE = "Meeting Notes"
 # Addresses whose SMTP server, port and sender we already know.
 GMAIL_DOMAINS = ("gmail.com", "googlemail.com")
-GMAIL_HOST, GMAIL_PORT = "smtp.gmail.com", 465
+GMAIL_HOST = "smtp.gmail.com"
 
 # None = not tried yet, False = not usable here, otherwise the keyring module.
 _KEYRING = None
 
 
 def mail_mode() -> str:
-    return paths.setting("MAIL_MODE", "outlook_draft")
+    return paths.setting("MAIL_MODE")
 
 
 # ---------------------------------------------------------------- the account
@@ -72,7 +70,9 @@ def account() -> str:
     return paths.setting("SMTP_USER").strip()
 
 
-def keychain_password(address: str) -> str:
+def password(address: str = None) -> str:
+    """The app password for an address (the saved account by default), or ""."""
+    address = address or account()
     ring = _keyring()
     if not (ring and address):
         return ""
@@ -95,20 +95,6 @@ def set_keychain_password(address: str, secret: str) -> bool:
         return False
 
 
-def password(address: str = None) -> str:
-    """The app password: the Keychain first, then .env as a fallback.
-
-    The .env fallback is only there for an account set up before the Keychain was
-    used; `move_password_to_keychain` is offered once to get rid of it.
-    """
-    address = address or account()
-    return keychain_password(address) or paths.setting("SMTP_PASSWORD")
-
-
-def password_in_env() -> bool:
-    return bool(paths.setting("SMTP_PASSWORD"))
-
-
 def save_account(address: str, secret: str) -> str:
     """Store the account and switch to SMTP. Returns "" or what went wrong."""
     address = (address or "").strip()
@@ -118,27 +104,11 @@ def save_account(address: str, secret: str) -> str:
         if not set_keychain_password(address, secret):
             return ("The Keychain could not be written to, so the password was "
                     "not saved. The log has the reason.")
-        # It is in the Keychain now, so it has no business being in .env too.
-        if password_in_env():
-            paths.remove_setting("SMTP_PASSWORD")
     elif not password(address):
         return "There is no password saved for that address yet."
     paths.save_setting("SMTP_USER", address)
     paths.save_setting("MAIL_MODE", "smtp")
     log.info("Mail account set to %s, sending over SMTP", address)
-    return ""
-
-
-def move_password_to_keychain() -> str:
-    """The one-time move of an old .env password. Returns "" or what went wrong."""
-    address, secret = account(), paths.setting("SMTP_PASSWORD")
-    if not (address and secret):
-        return "There is no address and password in .env to move."
-    if not set_keychain_password(address, secret):
-        return "The Keychain could not be written to. The log has the reason."
-    paths.remove_setting("SMTP_PASSWORD")
-    log.info("Moved the SMTP password for %s out of .env and into the Keychain",
-             address)
     return ""
 
 
@@ -155,17 +125,9 @@ def smtp_settings(address: str = None) -> dict:
     """
     address = (address or account()).strip()
     host = paths.setting("SMTP_HOST") or (GMAIL_HOST if is_gmail(address) else "")
-    port = paths.setting_int("SMTP_PORT", GMAIL_PORT)
+    port = int(paths.number("SMTP_PORT"))
     return {"user": address, "host": host, "port": port,
             "sender": paths.setting("SMTP_FROM") or address}
-
-
-def load_people() -> dict:
-    path = PEOPLE_FILE if PEOPLE_FILE.exists() else CODE / "config" / "people.yaml"
-    if not path.exists():
-        return {}
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    return {str(k).strip(): str(v).strip() for k, v in (data.get("people") or {}).items()}
 
 
 def as_entry(name: str, addr: str) -> str:
@@ -191,39 +153,6 @@ def split_addresses(raw: str) -> list:
 def email_of(entry: str) -> str:
     """'Name <a@b.com>' -> 'a@b.com'. For comparison and for Outlook."""
     return parseaddr(entry)[1].strip()
-
-
-def resolve_recipients(participants) -> list:
-    """RECIPIENTS from .env plus participants matched in people.yaml.
-
-    Both a bare address and the "Name <address>" form are accepted everywhere.
-    """
-    out, seen = [], set()
-
-    def add(entry: str):
-        addr = email_of(entry).lower()
-        if addr and addr not in seen:
-            seen.add(addr)
-            out.append(entry)
-
-    for entry in split_addresses(paths.setting("RECIPIENTS")):
-        add(entry)
-
-    people = load_people()
-    lowered = {k.lower(): (k, v) for k, v in people.items()}
-    for name in participants or []:
-        key = str(name).strip().lower()
-        hit = lowered.get(key)
-        if not hit:  # partial match: first or last name alone
-            for pname, pair in lowered.items():
-                if key and (key in pname or pname in key):
-                    hit = pair
-                    break
-        if hit:
-            pretty, value = hit
-            # bare address on the right — take the display name from the key
-            add(value if email_of(value) != value else as_entry(pretty, value))
-    return out
 
 
 def render(data: dict) -> tuple:

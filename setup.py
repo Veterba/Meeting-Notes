@@ -8,7 +8,6 @@ DATA_FILES = [
     ("assets", ["assets/icon.png", "assets/icon-paused.png"]),
     ("prompts", ["prompts/map.md", "prompts/reduce.md"]),
     ("templates", ["templates/email.html"]),
-    ("config", ["config/people.yaml"]),
     ("", [".env.example"]),
 ]
 
@@ -19,8 +18,9 @@ OPTIONS = {
         "CFBundleName": "Meeting Notes",
         "CFBundleDisplayName": "Meeting Notes",
         "CFBundleIdentifier": "local.meetingnotes.app",
-        "CFBundleShortVersionString": "1.0.0",
-        "CFBundleVersion": "1.0.0",
+        # The version of the commit it was built from: v0.MINOR.PATCH.
+        "CFBundleShortVersionString": "0.4.0",
+        "CFBundleVersion": "0.4.0",
         # No Dock icon: the menu bar item is the whole app.
         "LSUIElement": True,
         "LSMinimumSystemVersion": "12.0",
@@ -31,12 +31,12 @@ OPTIONS = {
             "Meeting Notes creates the email draft in Outlook for you.",
     },
     # Traced automatically, but these are imported lazily or by name.
-    "includes": ["paths", "parser", "llm", "mailer", "main", "server", "window",
-                 "history", "menu",
+    "includes": ["paths", "parser", "llm", "mailer", "main", "pipeline", "watcher",
+                 "server", "window", "history", "menu",
                  "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper",
                  # jaraco is a namespace package, so py2app cannot take it whole.
                  "jaraco.classes.properties", "jaraco.context", "jaraco.functools"],
-    "packages": ["rumps", "watchdog", "jinja2", "dotenv", "docx", "yaml", "requests",
+    "packages": ["rumps", "watchdog", "jinja2", "dotenv", "docx", "requests",
                  "certifi", "urllib3", "charset_normalizer", "idna",
                  # keyring finds its backends through entry points, which do not
                  # survive the bundle — mailer picks the macOS one by hand.

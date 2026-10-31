@@ -5,7 +5,7 @@ from pathlib import Path
 
 import history
 import llm
-import main
+import pipeline
 import menu
 from helpers import fake_summarize, wait_until
 
@@ -188,8 +188,8 @@ def test_the_meetings_in_the_menu_come_from_the_history(box, worker, monkeypatch
     monkeypatch.setattr(llm, "summarize", fake_summarize)
     monkeypatch.setattr(llm, "ollama_up", lambda: True)
     for name in ("first.vtt", "second.vtt"):
-        decision = main.submit(transcript(box.inbox, name))
-        assert wait_until(lambda d=decision: history.find(d["hash"])["status"] == "ready")
+        decision = pipeline.submit(transcript(box.inbox, name))
+        assert wait_until(lambda d=decision: history.find(d.meeting)["status"] == "ready")
 
     items = menu.meeting_items(history.listing(7))
 

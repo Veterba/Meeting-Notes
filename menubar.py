@@ -16,9 +16,11 @@ from PyObjCTools import AppHelper
 import history
 import llm
 import mailer
-import main as pipeline
+import main
 import menu
 import paths
+import pipeline
+from watcher import Watcher
 
 ICON = paths.CODE / "assets" / "icon.png"
 ICON_PAUSED = paths.CODE / "assets" / "icon-paused.png"
@@ -84,7 +86,10 @@ def notify(title: str, message: str):
     try:
         rumps.notification(title, "", message)
     except Exception:  # unbundled runs have no bundle id for notifications
-        osa(f"display notification {message!r} with title {title!r}")
+        # The text goes in as arguments, so no quote in a file name can break it.
+        subprocess.run(["osascript", "-e", "on run argv",
+                        "-e", "display notification (item 2 of argv) with title (item 1 of argv)",
+                        "-e", "end run", title, message], capture_output=True)
 
 
 class TranscriptApp(rumps.App):
@@ -93,7 +98,6 @@ class TranscriptApp(rumps.App):
         self.watcher = None
         self.enabled = paths.flag("WATCH_ENABLED")
         self.status_items = []
-        self._offered_keychain = False
         # What Ollama said, last time it was asked. Filled in off the main thread,
         # because asking it is a network call and the menu must not wait for it.
         self.net = {"ollama_up": False, "model": llm.default_model(),
@@ -152,31 +156,6 @@ class TranscriptApp(rumps.App):
         """Keep the status lines current while a job runs. No network, no sqlite."""
         for line, item in zip(menu.status_lines(self.status_facts()), self.status_items):
             item.title = line
-        if not self._offered_keychain:
-            self._offered_keychain = True     # before the modal, not after
-            self.offer_the_keychain()
-
-    def offer_the_keychain(self):
-        """Once: an app password left in .env from before the Keychain was used."""
-        if not (mailer.password_in_env() and mailer.account()):
-            return
-        if paths.flag("KEYCHAIN_OFFERED", False):
-            return
-        move = rumps.alert(
-            title="Move the mail password out of .env?",
-            message=(f"The app password for {mailer.account()} is sitting in plain "
-                     "text in .env. It can live in your Keychain instead, and be "
-                     "taken out of the file."),
-            ok="Move it", cancel="Leave it")
-        if not move:
-            paths.save_setting("KEYCHAIN_OFFERED", "1")
-            return
-        problem = mailer.move_password_to_keychain()
-        if problem:
-            notify("Could not use the Keychain", problem)
-            return                            # worth offering again next time
-        paths.save_setting("KEYCHAIN_OFFERED", "1")
-        notify("Password moved", "It is in your Keychain now, and out of .env.")
 
     @rumps.timer(20)
     def probe_timer(self, _):
@@ -187,13 +166,9 @@ class TranscriptApp(rumps.App):
         up = llm.ollama_up()
         installed = llm.installed_models() if up else []
         model = llm.default_model()
-        choices = []
-        for name in [model, llm.MODEL_SMALL, llm.MODEL_MID, llm.MODEL_BIG] + installed:
-            if name and name not in choices:
-                choices.append(name)
         on_main(self._probed, {
-            "ollama_up": up, "model": model, "models": choices, "installed": installed,
-            "model_ready": model in installed or f"{model}:latest" in installed})
+            "ollama_up": up, "model": model, "models": llm.model_choices(installed),
+            "installed": installed, "model_ready": llm.has_model(model, installed)})
 
     def _probed(self, net: dict):
         # Only redraw the whole thing when the choices themselves changed; the
@@ -203,7 +178,9 @@ class TranscriptApp(rumps.App):
         self.rebuild() if redraw else self.tick(None)
 
     def _startup_checks(self):
-        """The slow questions, off the main thread: the Keychain and Ollama."""
+        """The slow work, off the main thread: what was left unfinished, the
+        Keychain and Ollama."""
+        pipeline.resume()
         pipeline.log.info("Keychain: %s",
                           "available" if mailer.keychain_ready() else "NOT available")
         if not llm.ollama_up():
@@ -235,7 +212,7 @@ class TranscriptApp(rumps.App):
             pipeline.log.info("Watching paused")
             return
 
-        self.watcher = pipeline.Watcher()      # the folder comes from paths
+        self.watcher = Watcher()               # the folder comes from paths
         self.watcher.start()
 
     # ------------------------------------------------------------ jobs
@@ -270,10 +247,10 @@ class TranscriptApp(rumps.App):
         # refused, if the worker is busy — and if this meeting has been
         # summarised before, its notes open instead of being made again.
         decision = pipeline.submit(path)
-        if not decision.get("ok"):
-            notify("Could not read that file", decision.get("error", ""))
-        elif not decision.get("queued") and decision.get("notes"):
-            self.window.show(open_path=decision["notes"])
+        if decision.error:
+            notify("Could not read that file", decision.error)
+        elif decision.notes and not decision.queued:
+            self.window.show(decision.meeting)
         self.rebuild()
 
     def toggle_watching(self, sender, _arg=None):
@@ -283,14 +260,12 @@ class TranscriptApp(rumps.App):
         self.rebuild()
 
     def open_notes(self, sender, meeting):
-        row = history.find(meeting)
-        if row and row["notes"]:
-            self.window.show(open_path=row["notes"])
+        self.window.show(meeting)
 
     def reprocess(self, sender, meeting):
-        result = pipeline.retry(meeting)
-        if not result.get("ok"):
-            notify("Cannot reprocess", result.get("error", ""))
+        decision = pipeline.retry(meeting)
+        if decision.error:
+            notify("Cannot reprocess", decision.error)
         self.rebuild()
 
     def reveal(self, sender, meeting):
@@ -315,7 +290,7 @@ class TranscriptApp(rumps.App):
     def choose_model(self, sender, name):
         paths.save_setting("OLLAMA_MODEL", name)
         if name not in (self.net.get("installed") or []):
-            pipeline.WORKER.submit(name, kind="pull")
+            pipeline.WORKER.submit(pipeline.Job(model=name))
             notify("Downloading the model", f"{name} — several GB, this takes a while")
         threading.Thread(target=self._probe, daemon=True).start()
         self.rebuild()
@@ -369,6 +344,7 @@ class TranscriptApp(rumps.App):
 def run():
     from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
 
+    main.init()
     NSApplication.sharedApplication().setActivationPolicy_(
         NSApplicationActivationPolicyAccessory)   # keep it out of the Dock
     TranscriptApp().run()

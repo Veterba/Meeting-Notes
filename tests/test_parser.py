@@ -27,12 +27,16 @@ DIALOGUE = [
 CUE = "0d5a1b9a-3c4e-4e5f-8a1b-2c3d4e5f6a7b"
 
 # Junk from the container that must never reach the model.
-JUNK = ("-->", "WEBVTT", "X-TIMESTAMP-MAP", "</v>", "00:00:")
+JUNK = ("-->", "WEBVTT", "X-TIMESTAMP-MAP", "</v>", "00:00:", "0:0:", "transcription")
 
 
 def timecode(i):
     a, b = 2 + i * 6, 7 + i * 6
     return f"00:{a // 60:02d}:{a % 60:02d}.000 --> 00:{b // 60:02d}:{b % 60:02d}.000"
+
+
+def old_timecode(i):
+    return f"0:0:{i * 6}.0 --> 0:0:{i * 6 + 5}.370"
 
 
 def build_vtt(tmp, name, turns, dialect="classic", header="WEBVTT\n") -> Path:
@@ -44,9 +48,12 @@ def build_vtt(tmp, name, turns, dialect="classic", header="WEBVTT\n") -> Path:
             cue_id, body = str(i + 1), f"<v {speaker}>{text}"
         elif dialect == "flat":           # no tags at all
             cue_id, body = str(i + 1), f"{speaker}: {text}"
+        elif dialect == "old":            # old Teams: short timecodes, no cue ids
+            cue_id, body = "", f"<v {speaker}>{text}</v>"
         else:
             raise ValueError(dialect)
-        blocks.append(f"\n{cue_id}\n{timecode(i)}\n{body}\n")
+        code = old_timecode(i) if dialect == "old" else timecode(i)
+        blocks.append(f"\n{cue_id}\n{code}\n{body}\n" if cue_id else f"\n{code}\n{body}\n")
     p = tmp / f"{name}.vtt"
     p.write_text("".join(blocks), encoding="utf-8")
     return p
@@ -74,6 +81,21 @@ DOCX_TAB = sum(
     [[f"{s}\t0:{i * 7:02d}", t, ""] for i, (s, t) in enumerate(DIALOGUE)], [])
 DOCX_SPACES = sum(
     [[f"{s}   0:00:{i * 7:02d}", t] for i, (s, t) in enumerate(DIALOGUE)], [])
+
+# Current Teams .docx: a header whose date ends in a time, a line Teams writes
+# itself, and speech that has a colon or a clock time in it.
+DOCX_CURRENT = (
+    ["Совещание по проекту", "October 6, 2026, 10:00AM", "32m 14s",
+     f"{A} started transcription"]
+    + sum([[f"{s}   {i // 60}:{i % 60:02d}", t] for i, (s, t) in enumerate(DIALOGUE)], [])
+    [:6]
+    + ["План на сегодня: закрыть релиз и шлюз.", "Созвонимся завтра в 10:30"]
+    + sum([[f"{s}   1:{i:02d}", t] for i, (s, t) in enumerate(DIALOGUE[3:], 3)], [])
+    + [f"{A} stopped transcription"])
+# Old Teams .docx: the timecode, the name and the text in one paragraph.
+OLD_SPEAKERS = {A: "Speaker 1", B: "Speaker 2"}
+DOCX_OLD = [f"{old_timecode(i)}\n{OLD_SPEAKERS[s]}\n{t}" for i, (s, t) in enumerate(DIALOGUE)]
+OLD = [(OLD_SPEAKERS[s], t) for s, t in DIALOGUE]
 
 ACCEPTED = [
     pytest.param(
@@ -105,13 +127,24 @@ ACCEPTED = [
     pytest.param(
         lambda d: build_docx(d, "spaces", DOCX_SPACES), [A, B], ["Коллеги, начнём."],
         id="docx-name-and-time-via-spaces"),
+    pytest.param(
+        lambda d: build_vtt(d, "old", OLD, "old"), ["Speaker 1", "Speaker 2"],
+        ["Коллеги, начнём."], id="vtt-old-teams-short-timecodes"),
+    pytest.param(
+        lambda d: build_docx(d, "old", DOCX_OLD), ["Speaker 1", "Speaker 2"],
+        ["Коллеги, начнём.", "юристы ответят по договору"], id="docx-old-teams-one-paragraph"),
+    pytest.param(
+        lambda d: build_docx(d, "current", DOCX_CURRENT), [A, B],
+        ["План на сегодня: закрыть релиз", "Созвонимся завтра в 10:30"],
+        id="docx-current-teams-header-and-colons"),
 ]
 
 
 @pytest.mark.parametrize("build, want_speakers, want_fragments", ACCEPTED)
 def test_accepted(tmp_path, build, want_speakers, want_fragments):
     """Must parse correctly AND be recognised as a transcript."""
-    turns = tparser.parse(build(tmp_path))
+    parsed = tparser.parse(build(tmp_path))
+    turns = parsed.turns
     text = tparser.to_text(turns)
 
     assert tparser.speakers(turns) == want_speakers
@@ -119,7 +152,7 @@ def test_accepted(tmp_path, build, want_speakers, want_fragments):
         assert frag in text, f"lost fragment {frag!r}"
     for junk in JUNK:
         assert junk not in text, f"junk leaked into the text: {junk!r}"
-    ok, reason = tparser.looks_like_transcript(turns)
+    ok, reason = tparser.looks_like_transcript(parsed)
     assert ok, f"rejected as not a transcript: {reason}"
 
 
@@ -180,9 +213,46 @@ REJECTED = [
 def test_rejected(tmp_path, build, expect_in_reason):
     """Must NOT be handed to the model, and for the stated reason."""
     try:
-        turns = tparser.parse(build(tmp_path))
+        parsed = tparser.parse(build(tmp_path))
     except Exception:
         return          # never reached the model either, which is the point
-    ok, reason = tparser.looks_like_transcript(turns)
+    ok, reason = tparser.looks_like_transcript(parsed)
     assert not ok, "accepted as a transcript, should have been rejected"
     assert expect_in_reason in reason, f"rejected for the wrong reason — {reason}"
+
+
+# ---------------------------------------------------------------- no speakers
+
+SEGMENTS = (["Transkript razgovora", "Datoteka: sastanak.m4a"]
+            + [f"[00:00:{i * 7:02d}.660 - 00:00:{i * 7 + 6:02d}.080] {t}"
+               for i, (_, t) in enumerate(DIALOGUE)])
+
+
+def test_a_speech_to_text_export_is_one_turn_per_segment_and_names_nobody(tmp_path):
+    parsed = tparser.parse(build_docx(tmp_path, "segments", SEGMENTS))
+
+    assert parsed.named is False
+    assert [t for _, t in parsed.turns] == [t for _, t in DIALOGUE]
+    assert tparser.speakers(parsed.turns) == [tparser.UNKNOWN]
+    assert tparser.looks_like_transcript(parsed) == (True, "")
+    # The model reads the words alone, not "Unknown: …" on every line.
+    assert tparser.to_text(parsed.turns).splitlines()[0] == DIALOGUE[0][1]
+
+
+def test_the_current_docx_header_never_becomes_a_speaker(tmp_path):
+    parsed = tparser.parse(build_docx(tmp_path, "current", DOCX_CURRENT))
+    text = tparser.to_text(parsed.turns)
+
+    assert "October" not in text and "32m" not in text
+    assert "Совещание по проекту" not in text
+    assert all(s in (A, B) for s in tparser.speakers(parsed.turns))
+
+
+@pytest.mark.parametrize("name, ok", [
+    ("Ivan Petrov", True), ("Alexey Gromov (Guest)", True), ("Speaker 2", True),
+    ("Ludwig van Beethoven", True), ("Ярослав Ветерба", True),
+    ("October 6, 2026,", False), ("Let's meet at", False), ("Созвонимся завтра в", False),
+    ("Both halves were verified", False), ("2026 report", False),
+])
+def test_what_counts_as_a_name(name, ok):
+    assert tparser._looks_like_name(name) is ok

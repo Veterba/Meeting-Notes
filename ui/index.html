@@ -67,7 +67,7 @@
 
 <script>
 const TOKEN = "__TOKEN__";
-let STATE = null, NOTES = null, NOTES_PATH = null;
+let STATE = null, NOTES = null, MEETING = null;
 
 const $ = id => document.getElementById(id);
 const esc = s => (s ?? "").toString().replace(/[&<>"]/g, c =>
@@ -119,10 +119,11 @@ function sendLabel(){
 
 function lines(a){ return (a || []).join("\n"); }
 
-async function openNotes(path){
+async function openMeeting(meeting){
   if (!STATE) await refresh();
-  NOTES_PATH = path;
-  NOTES = await api("/api/notes?path=" + encodeURIComponent(path));
+  MEETING = meeting;
+  NOTES = await api(`/api/meeting/${meeting}`);
+  if (NOTES.error){ $("pane").innerHTML = `<p class="empty">${esc(NOTES.error)}</p>`; return; }
   renderNotes();
 }
 
@@ -241,24 +242,21 @@ function say(msg, cls){
 }
 
 async function saveNotes(){
-  await api("/api/notes", {path: NOTES_PATH, data: collect()});
-  say("Saved", "ok");
+  const r = await api(`/api/meeting/${MEETING}`, {data: collect()});
+  say(r.ok ? "Saved" : r.error, r.ok ? "ok" : "bad");
 }
 
 async function send(){
   const recipients = $("f-recipients").value.split("\n").map(s => s.trim()).filter(Boolean);
   say("Working…");
-  const data = collect();
-  data.recipients = recipients;
-  await api("/api/notes", {path: NOTES_PATH, data});
-  const r = await api("/api/send", {data, recipients, path: NOTES_PATH});
+  const r = await api(`/api/meeting/${MEETING}/send`, {data: collect(), recipients});
   say(r.ok ? r.message : r.error, r.ok ? "ok" : "bad");
 }
 
 (async () => {
   await refresh();
-  const wanted = new URLSearchParams(location.search).get("open");
-  if (wanted) openNotes(wanted);
+  const wanted = new URLSearchParams(location.search).get("meeting");
+  if (wanted) openMeeting(wanted);
 })();
 setInterval(refresh, 3000);
 </script>
