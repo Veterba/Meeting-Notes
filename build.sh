@@ -19,6 +19,11 @@ say "Installing build dependencies"
 "$PY" -m pip install -q --upgrade pip
 "$PY" -m pip install -q -r requirements.txt py2app
 
+say "Building the window (React)"
+command -v npm >/dev/null || { echo "npm not found. Install it: brew install node"; exit 1; }
+npm ci --prefix ui --no-audit --no-fund >/dev/null
+npm run build --prefix ui >/dev/null
+
 say "Drawing the icons"
 "$PY" assets/make_icon.py --icns >/dev/null
 

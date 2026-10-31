@@ -25,3 +25,7 @@ failed/
 
 # macOS
 .DS_Store
+
+# the window: npm dependencies and the build (build.sh and run.sh make it)
+ui/node_modules/
+ui/dist/

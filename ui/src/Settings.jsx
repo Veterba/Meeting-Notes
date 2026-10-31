@@ -1,0 +1,136 @@
+import { useState } from "react";
+import { api, lines, shortPath } from "./api.js";
+
+const MAIL_MODES = [["outlook_draft", "draft in outlook"], ["smtp", "send over smtp"]];
+
+export default function Settings({ state, refresh, say }) {
+  async function change(values, done) {
+    const r = await api("/api/settings", values);
+    if (r.error) say(r.error, "bad");
+    else if (done) say(done, "ok");
+    refresh();
+  }
+
+  async function chooseFolder() {
+    const r = await api("/api/folder", {});
+    if (r.error) say(r.error, "bad");
+    refresh();
+  }
+
+  return (
+    <div className="settings">
+      <h1>settings</h1>
+
+      <Group title="inbox" hint="Where Teams transcripts land. New ones are picked up by themselves.">
+        <div className="inline">
+          <code className="path" title={state.folder}>{shortPath(state.folder)}</code>
+          <button onClick={chooseFolder}>change…</button>
+        </div>
+        <label className="switch">
+          <input type="checkbox" checked={state.watching}
+                 onChange={(e) => change({ watching: e.target.checked })} />
+          <span className="knob" />
+          watch the folder
+        </label>
+      </Group>
+
+      <Group title="model" hint={state.ollama_up
+        ? "Runs locally through Ollama. One not downloaded yet is fetched when you pick it — several GB."
+        : "Ollama is not answering, so there is nothing to choose from."}>
+        {state.models.length > 0 && (
+          <div className="segments">
+            {state.models.map((name) => (
+              <button key={name} className={name === state.model ? "on" : ""}
+                      disabled={!state.ollama_up}
+                      onClick={() => name !== state.model && change({ model: name })}>
+                {name}{!state.installed.includes(name) && <span className="dim"> ↓</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </Group>
+
+      <Group title="mail" hint="Outlook drafts wait in Outlook for you to send. SMTP sends straight away from the account below.">
+        <div className="segments">
+          {MAIL_MODES.map(([mode, label]) => (
+            <button key={mode} className={mode === state.mail_mode ? "on" : ""}
+                    onClick={() => change({ mail_mode: mode })}>{label}</button>
+          ))}
+        </div>
+        <Account state={state} refresh={refresh} />
+      </Group>
+
+      <Recipients state={state} change={change} />
+    </div>
+  );
+}
+
+function Group({ title, hint, children }) {
+  return (
+    <section className="group">
+      <h3>{title}</h3>
+      {hint && <p className="hint">{hint}</p>}
+      {children}
+    </section>
+  );
+}
+
+// The address goes into the settings, the password into the Keychain. The page
+// never gets a password back — the field starts empty and stays write-only.
+function Account({ state, refresh }) {
+  const [address, setAddress] = useState(state.account || "");
+  const [secret, setSecret] = useState("");
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    setBusy(true);
+    const r = await api("/api/account", { address, password: secret });
+    setBusy(false);
+    setResult(r.ok ? { ok: true, text: `Saved. Sending as ${address.trim()} over SMTP.` }
+                   : { ok: false, text: r.error });
+    if (r.ok) setSecret("");
+    refresh();
+  }
+
+  async function test() {
+    setBusy(true);
+    setResult({ ok: true, text: "sending…" });
+    const r = await api("/api/account/test", { address, password: secret });
+    setBusy(false);
+    setResult({ ok: r.ok, text: r.message });
+  }
+
+  return (
+    <div className="fields">
+      <label>
+        <span>account</span>
+        <input placeholder="you@gmail.com" value={address} onChange={(e) => setAddress(e.target.value)} />
+      </label>
+      <label>
+        <span>app password</span>
+        <input type="password" placeholder={state.account ? "saved in the keychain" : ""}
+               value={secret} onChange={(e) => setSecret(e.target.value)} />
+      </label>
+      <div className="inline">
+        <button disabled={busy} onClick={save}>save account</button>
+        <button disabled={busy} onClick={test}>send test email</button>
+      </div>
+      <p className="hint">Gmail app passwords: myaccount.google.com/apppasswords</p>
+      {result && <pre className={`result ${result.ok ? "ok" : "bad"}`}>{result.text}</pre>}
+    </div>
+  );
+}
+
+function Recipients({ state, change }) {
+  const [text, setText] = useState(state.recipients.join("\n"));
+  return (
+    <Group title="default recipients"
+           hint={'Everyone here gets every set of notes. One per line: a bare address, or "Name <address>".'}>
+      <textarea rows={4} value={text} onChange={(e) => setText(e.target.value)} />
+      <div className="inline">
+        <button onClick={() => change({ recipients: lines(text) }, "Recipients saved")}>save</button>
+      </div>
+    </Group>
+  );
+}

@@ -137,6 +137,7 @@ def tree(facts: dict) -> list:
     items = [Item(line, role="status") for line in status_lines(facts)]
     items += [
         SEPARATOR,
+        Item("Open Meeting Notes", action="open_window", key="o"),
         Item("Recent meetings", children=tuple(meeting_items(facts.get("meetings")))),
         Item("Process a file…", action="pick_file"),
         Item("Watch the folder", action="toggle_watching",

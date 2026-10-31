@@ -71,7 +71,7 @@ def test_the_dropdown_is_in_the_agreed_order():
     assert titles(menu.tree(FACTS)) == [
         "● Ollama: running", "Model: qwen3.5:9b", "Watching: ~/Downloads", "Now: Idle",
         "-",
-        "Recent meetings", "Process a file…", "Watch the folder",
+        "Open Meeting Notes", "Recent meetings", "Process a file…", "Watch the folder",
         "-",
         "Settings",
         "-",

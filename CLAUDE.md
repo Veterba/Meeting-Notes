@@ -26,27 +26,32 @@ Exception: files, code comments, commit messages, docs and log notes are written
 sentence case, plain and clear. The style above applies only to chat replies.
 
 ## Project
-Meeting Notes: a macOS menu bar app in Python 3.11. It gets a meeting transcript, turns it
-into structured notes (JSON) with a local Ollama model, and emails them after I review them.
+Meeting Notes: a full local macOS app in Python 3.11 (main window + menu bar widget). It gets
+a meeting transcript, turns it into structured notes (JSON) with a local Ollama model, and
+emails them after I review them.
 Semi-automatic on purpose: nothing is ever sent without my click.
 
 How a transcript flows:
 watcher sees a stable `.vtt` / `.docx` → `parser.py` turns it into turns (speaker, text) and
 checks it is a meeting → fingerprint of the turns → `history.db` (already seen? skip) → one
-worker queue → `llm.py` → notes JSON → review window → `mailer.py` sends.
+worker queue → `llm.py` → notes JSON → the window → `mailer.py` sends.
 
 Files:
-- `menubar.py` — rumps app: the dropdown, the watcher, the server and the window. `menu.py` —
-  the dropdown as plain data (`tree()`), tested without rumps.
-- `main.py` — `Watcher` (only detects files), `Worker` (the only thing that runs the model, one
-  job at a time), `register()` (parse, fingerprint, decide), and the CLI.
+- `menubar.py` — the app: Dock icon, app menu, rumps dropdown, starts the server and the
+  window. `menu.py` — the dropdown as plain data (`tree()`), tested without rumps.
+- `controller.py` — `Controller`: everything the window or the menu can ask for (settings,
+  the watcher, submit / retry / reveal, the Ollama probe). Both front ends go through it.
+- `pipeline.py` — `read()`/`Transcript`, `register()`/`Decision`, `process()`, the `Worker`
+  (the only thing that runs the model, one job at a time), `resume()`.
+- `watcher.py` — `Watcher` (only detects stable files). `main.py` — `init()` and the CLI.
 - `parser.py` — `.vtt` / `.docx` → turns; `looks_like_transcript()`.
 - `history.py` — sqlite `history.db`: fingerprint, source, status (found → processing → ready →
   sent, or failed / skipped), notes path, recipients.
 - `llm.py` — Ollama, map-reduce for long meetings, JSON schema. Prompts in `prompts/`.
 - `mailer.py` — Jinja2 email (`templates/`), Gmail SMTP or Outlook draft; mail password in the
   macOS Keychain via `keyring`.
-- `server.py` + `window.py` + `ui/index.html` — the review window (loopback API with a token).
+- `server.py` + `window.py` + `ui/` — the main window: loopback API with a token, a WKWebView,
+  and a React page (`ui/src`, built by Vite into gitignored `ui/dist`).
 - `paths.py` — the only place that knows folders and settings. Data always lives in
   `~/Library/Application Support/Meeting Notes/` (`.env`, `history.db`, `processed/`, `logs/`),
   overridable with `MEETING_NOTES_DATA`.
@@ -54,23 +59,26 @@ Files:
 I use it as the built `Meeting Notes.app` (`./build.sh`). `./run.sh` is the developer's way to
 run from source; it uses the same data folder. Never `./build.sh --install` without asking.
 
-The UI is the menu bar dropdown (native rumps menu). Keep its look; it is a widget, not a full app.
-The window opens only to review and send one meeting's notes.
+The app is a full local app: the main window (meetings, notes editor, settings, job status)
+is the primary UI; the menu bar dropdown (native rumps menu) is the quick widget and keeps
+the app alive when the window is closed. The window's look: an ordered-dither cloud sky in
+navy / indigo / lavender / cream, under one pane of glass.
+Keep that palette and style.
 
 Where things stand:
 - `CHANGELOG.md` says what each version changed. Read the top entries before starting.
 - My project note (context, plans, open problems; read only):
   /Users/vellow13/Documents/Recto Vault/Programming/Projects/Trasncript.md
-- Parser work from v0.3.1 (old Teams formats, current Teams `.docx`, speakerless transcripts)
-  was lost and is NOT in this repo yet: `parser.py` is still the v0.1 parser. Don't assume
-  those formats work.
+- The parser handles old Teams, current Teams `.docx` and speakerless exports (v0.4.0),
+  tested on synthetic samples only so far.
 - Planned main feature: recording a call (microphone + system audio through a Core Audio tap),
-  transcribing it locally, and feeding the turns into the same pipeline. Not started. Don't
-  build towards it unless the task says so.
+  transcribing it locally, and feeding the turns into the same pipeline. Next after the
+  window; not started yet.
 
 Checks before saying something is done:
 - `.venv/bin/python -m pytest -q`
 - `.venv/bin/ruff check .`
+- anything touching `ui/`: `cd ui && npm run build` must succeed.
 - anything touching the parser: also `.venv/bin/python main.py --parse-only examples/sample-meeting-ru.vtt`
 - anything touching the LLM path: one real run `main.py --once examples/sample-meeting-ru.vtt`
   with `MEETING_NOTES_DATA` pointing at a temp folder, only if Ollama is up and the model is

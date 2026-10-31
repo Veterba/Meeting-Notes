@@ -11,6 +11,7 @@ import pytest
 
 import mailer
 import paths
+import controller
 import server
 
 SECRET = "abcd efgh ijkl mnop"       # what an app password looks like
@@ -221,9 +222,10 @@ def test_a_nonsense_address_never_reaches_the_server(temp_env, smtp):
 def test_the_password_is_never_in_an_api_response(temp_env, keychain):
     mailer.save_account(ADDRESS, SECRET)
 
-    payload = json.dumps(server.state())
+    state = server.state(controller.Controller())
+    payload = json.dumps(state)
 
-    assert set(server.state()) == {"mail_mode", "recipients", "job"}
+    assert state["account"] == ADDRESS
     assert SECRET not in payload
     assert "password" not in payload.lower()
 

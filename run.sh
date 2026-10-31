@@ -28,6 +28,15 @@ if ! "$PY" -c "import rumps, WebKit, watchdog, jinja2, dotenv, docx, requests, k
   "$PY" -m pip install -q -r requirements.txt
 fi
 
+# --- the window ---------------------------------------------------------
+# Rebuilt whenever its source is newer than the last build.
+if [ ! -f ui/dist/index.html ] || [ -n "$(find ui/src ui/index.html ui/package.json -newer ui/dist/index.html 2>/dev/null)" ]; then
+  command -v npm >/dev/null || die "npm not found. Install it: brew install node"
+  say "Building the window"
+  [ -d ui/node_modules ] || npm ci --prefix ui --no-audit --no-fund >/dev/null
+  npm run build --prefix ui >/dev/null
+fi
+
 # Settings, notes and logs live in the data folder, not here — the first start
 # creates it from .env.example, or from this folder's .env if there is one.
 # MEETING_NOTES_DATA overrides it, for a dev run that must not touch the real one.

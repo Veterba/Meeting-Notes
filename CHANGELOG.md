@@ -6,6 +6,18 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.5.0 — 2026-10-31
+### Added
+- A main window: meeting list with search and status filters, the notes editor, Reprocess and
+  Show transcript, Process a file…, settings (folder, watching, model, mail mode and account,
+  recipients) and the job with a progress bar. React + Vite in `ui/`; a dithered night sky under one pane of glass.
+- A Dock icon, an app menu with Edit (copy and paste work in the window), and *Open Meeting
+  Notes* (⌘O) in the dropdown. The window opens at launch; the Dock icon reopens it.
+### Changed
+- The menu bar and the window act through one `Controller` (`controller.py`); the API gained
+  state, settings, account, pick, folder, retry and reveal routes.
+- `build.sh` and `run.sh` build the window with npm; Node.js is now a build requirement.
+
 ## v0.4.0 — 2026-10-31
 ### Added
 - The parser reads old Teams `.vtt` / `.docx`, the current Teams `.docx` header, and

@@ -1,10 +1,14 @@
 """py2app build: python setup.py py2app   (build.sh is the friendlier way in)"""
+from glob import glob
+
 from setuptools import setup
 
 APP = ["menubar.py"]
 
 DATA_FILES = [
-    ("ui", ["ui/index.html"]),
+    # The React build; build.sh runs `npm run build` first.
+    ("ui/dist", ["ui/dist/index.html"]),
+    ("ui/dist/assets", glob("ui/dist/assets/*")),
     ("assets", ["assets/icon.png", "assets/icon-paused.png"]),
     ("prompts", ["prompts/map.md", "prompts/reduce.md"]),
     ("templates", ["templates/email.html"]),
@@ -19,10 +23,8 @@ OPTIONS = {
         "CFBundleDisplayName": "Meeting Notes",
         "CFBundleIdentifier": "local.meetingnotes.app",
         # The version of the commit it was built from: v0.MINOR.PATCH.
-        "CFBundleShortVersionString": "0.4.0",
-        "CFBundleVersion": "0.4.0",
-        # No Dock icon: the menu bar item is the whole app.
-        "LSUIElement": True,
+        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleVersion": "0.5.0",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
         # The UI is served from 127.0.0.1, which needs an ATS exception.
@@ -32,6 +34,7 @@ OPTIONS = {
     },
     # Traced automatically, but these are imported lazily or by name.
     "includes": ["paths", "parser", "llm", "mailer", "main", "pipeline", "watcher",
+                 "controller",
                  "server", "window", "history", "menu",
                  "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper",
                  # jaraco is a namespace package, so py2app cannot take it whole.

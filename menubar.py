@@ -1,9 +1,10 @@
-"""macOS menu bar app. Owns the watcher, the job queue, the local API and the window.
+"""The macOS app: the window, the menu bar widget, the local API behind them.
 
 Run: python menubar.py  (or ./run.sh, or the built Meeting Notes.app)
-No Dock icon. The dropdown is the app: status at the top, then the meetings it has
-seen and what can be done to them, then the settings. The window opens for one
-meeting, to read its notes and send them.
+The window is the app: every meeting, its notes, the settings. The menu bar
+dropdown is the quick view of the same thing — status at the top, recent
+meetings, the settings — and keeps the app running when the window is closed.
+Both act through one `Controller`.
 """
 import json
 import subprocess
@@ -13,14 +14,12 @@ from pathlib import Path
 import rumps
 from PyObjCTools import AppHelper
 
-import history
-import llm
 import mailer
 import main
 import menu
 import paths
 import pipeline
-from watcher import Watcher
+from controller import Controller, ask_for_file, ask_for_folder
 
 ICON = paths.CODE / "assets" / "icon.png"
 ICON_PAUSED = paths.CODE / "assets" / "icon-paused.png"
@@ -38,11 +37,6 @@ def on_main(fn, *args):
         fn(*args)
     else:
         AppHelper.callAfter(fn, *args)
-
-
-def osa(script: str) -> str:
-    r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
-    return r.stdout.strip() if r.returncode == 0 else ""
 
 
 # The three buttons of the mail account sheet, in the order they are added.
@@ -95,40 +89,34 @@ def notify(title: str, message: str):
 class TranscriptApp(rumps.App):
     def __init__(self):
         super().__init__("Meeting Notes", icon=str(ICON), template=True, quit_button=None)
-        self.watcher = None
-        self.enabled = paths.flag("WATCH_ENABLED")
         self.status_items = []
-        # What Ollama said, last time it was asked. Filled in off the main thread,
-        # because asking it is a network call and the menu must not wait for it.
-        self.net = {"ollama_up": False, "model": llm.default_model(),
-                    "model_ready": False, "models": [], "installed": []}
+        self.app = Controller()
+        self.app.on_change = lambda: on_main(self.changed)
+        self.app.on_notice = lambda title, message: on_main(notify, title, message)
         pipeline.WORKER.on_event = self.on_job_event
 
         import server
         import window
-        url, _token, self.httpd = server.serve()
+        url, _token, self.httpd = server.serve(self.app)
         self.window = window.AppWindow(url)
 
-        self.rebuild()
-        self.apply_watch_state()
-        threading.Thread(target=self._startup_checks, daemon=True).start()
+        self.app.start()
+        self.changed()
+        rumps.events.before_quit.register(self.shutdown)
 
     # ------------------------------------------------------------ the menu
 
-    def status_facts(self) -> dict:
-        """What the four status lines need. Cheap enough to ask every two seconds."""
-        return {**self.net, "watching": self.enabled, "folder": paths.inbox(),
-                "job": pipeline.WORKER.snapshot()}
-
-    def facts(self) -> dict:
-        return {**self.status_facts(), "mail_mode": mailer.mail_mode(),
-                "meetings": history.listing(7)}
+    def changed(self):
+        """Something the menu shows changed. Main thread only."""
+        self.icon = str(ICON if self.app.watching else ICON_PAUSED)
+        self.template = True
+        self.rebuild()
 
     def rebuild(self):
         """Draw the whole dropdown from menu.tree(). Main thread only."""
         self.status_items = []
         items = []
-        for item in menu.tree(self.facts()):
+        for item in menu.tree(self.app.facts()):
             drawn = self.draw(item)
             if item.role == "status":
                 self.status_items.append(drawn)
@@ -154,66 +142,12 @@ class TranscriptApp(rumps.App):
     @rumps.timer(2)
     def tick(self, _):
         """Keep the status lines current while a job runs. No network, no sqlite."""
-        for line, item in zip(menu.status_lines(self.status_facts()), self.status_items):
+        for line, item in zip(menu.status_lines(self.app.status_facts()), self.status_items):
             item.title = line
 
     @rumps.timer(20)
     def probe_timer(self, _):
-        threading.Thread(target=self._probe, daemon=True).start()
-
-    def _probe(self):
-        """Ask Ollama what it is and what it has. Never on the main thread."""
-        up = llm.ollama_up()
-        installed = llm.installed_models() if up else []
-        model = llm.default_model()
-        on_main(self._probed, {
-            "ollama_up": up, "model": model, "models": llm.model_choices(installed),
-            "installed": installed, "model_ready": llm.has_model(model, installed)})
-
-    def _probed(self, net: dict):
-        # Only redraw the whole thing when the choices themselves changed; the
-        # status lines are updated by the two-second tick anyway.
-        redraw = (net["models"] != self.net["models"] or net["model"] != self.net["model"])
-        self.net = net
-        self.rebuild() if redraw else self.tick(None)
-
-    def _startup_checks(self):
-        """The slow work, off the main thread: what was left unfinished, the
-        Keychain and Ollama."""
-        pipeline.resume()
-        pipeline.log.info("Keychain: %s",
-                          "available" if mailer.keychain_ready() else "NOT available")
-        if not llm.ollama_up():
-            if llm.start_ollama():
-                pipeline.log.info("Started Ollama")
-            else:
-                on_main(notify, "Ollama is not installed",
-                        "Install it with: brew install ollama")
-        self._probe()
-
-    # ------------------------------------------------------------ watcher
-
-    def apply_watch_state(self):
-        """Match the running watcher to the settings. Main thread only.
-
-        Returns in milliseconds: the watcher only detects files, so stopping it
-        never waits for anything. A transcript already being summarised is left
-        alone and finishes even if watching is switched off underneath it — the
-        worker does not belong to the watcher.
-        """
-        if self.watcher:
-            self.watcher.stop()
-            self.watcher = None
-
-        self.icon = str(ICON if self.enabled else ICON_PAUSED)
-        self.template = True
-
-        if not self.enabled:
-            pipeline.log.info("Watching paused")
-            return
-
-        self.watcher = Watcher()               # the folder comes from paths
-        self.watcher.start()
+        threading.Thread(target=self.app.probe, daemon=True).start()
 
     # ------------------------------------------------------------ jobs
 
@@ -229,7 +163,7 @@ class TranscriptApp(rumps.App):
                 title = json.loads(out.read_text(encoding="utf-8")).get("title") or out.stem
             except Exception:
                 title = out.stem
-            notify("Notes ready", f"{title} — pick it from the menu to read and send")
+            notify("Notes ready", f"{title} — open it from the menu to read and send")
         elif kind == "error":
             notify("Could not process", f"{name}: {payload}")
         elif kind == "pull":
@@ -238,66 +172,50 @@ class TranscriptApp(rumps.App):
 
     # ------------------------------------------------------------ actions
 
+    def open_window(self, sender, _arg=None):
+        self.window.show()
+
     def pick_file(self, sender, _arg=None):
-        path = osa('POSIX path of (choose file with prompt "Choose a transcript" '
-                   'of type {"vtt", "docx"})')
+        path = ask_for_file()
         if not path:
             return
-        # Chosen by hand, so the transcript check is skipped. Queued, not
-        # refused, if the worker is busy — and if this meeting has been
-        # summarised before, its notes open instead of being made again.
-        decision = pipeline.submit(path)
+        # Queued, not refused, if the worker is busy — and if this meeting has
+        # been summarised before, its notes open instead of being made again.
+        decision = self.app.submit(path)
         if decision.error:
             notify("Could not read that file", decision.error)
         elif decision.notes and not decision.queued:
             self.window.show(decision.meeting)
-        self.rebuild()
 
     def toggle_watching(self, sender, _arg=None):
-        self.enabled = not self.enabled
-        paths.save_setting("WATCH_ENABLED", "1" if self.enabled else "0")
-        self.apply_watch_state()
-        self.rebuild()
+        self.app.set_watching(not self.app.watching)
 
     def open_notes(self, sender, meeting):
         self.window.show(meeting)
 
     def reprocess(self, sender, meeting):
-        decision = pipeline.retry(meeting)
+        decision = self.app.retry(meeting)
         if decision.error:
             notify("Cannot reprocess", decision.error)
-        self.rebuild()
 
     def reveal(self, sender, meeting):
-        row = history.find(meeting)
-        if not row:
-            return
-        src = Path(row["source"])
-        if src.exists():
-            subprocess.run(["open", "-R", str(src)], check=False)
-        else:
-            notify("The transcript has moved", f"It is no longer at {src}")
+        problem = self.app.reveal(meeting)
+        if problem:
+            notify("The transcript has moved", problem)
 
     def choose_folder(self, sender, _arg=None):
-        path = osa('POSIX path of (choose folder with prompt '
-                   '"Where transcripts arrive")')
-        if not path:
-            return
-        paths.save_setting("INBOX_DIR", path.rstrip("/"))
-        self.apply_watch_state()
-        self.rebuild()
+        path = ask_for_folder()
+        if path:
+            self.app.set_folder(path)
 
     def choose_model(self, sender, name):
-        paths.save_setting("OLLAMA_MODEL", name)
-        if name not in (self.net.get("installed") or []):
-            pipeline.WORKER.submit(pipeline.Job(model=name))
-            notify("Downloading the model", f"{name} — several GB, this takes a while")
-        threading.Thread(target=self._probe, daemon=True).start()
-        self.rebuild()
+        try:
+            self.app.set_model(name)
+        except ValueError as e:
+            notify("Cannot change the model", str(e))
 
     def choose_mail(self, sender, mode):
-        paths.save_setting("MAIL_MODE", mode)
-        self.rebuild()
+        self.app.set_mail_mode(mode)
 
     def mail_account(self, sender, _arg=None):
         """The address and the app password, and a way to prove they work."""
@@ -312,12 +230,11 @@ class TranscriptApp(rumps.App):
                 ok, message = mailer.send_test(address, secret or None)
                 status = ("✓ " if ok else "✕ ") + message
                 continue
-            problem = mailer.save_account(address, secret)
+            problem = self.app.save_account(address, secret)
             if problem:
                 status = "✕ " + problem
                 continue
             notify("Mail account saved", f"Sending as {address.strip()}")
-            self.rebuild()
             return
 
     def edit_recipients(self, sender, _arg=None):
@@ -328,26 +245,42 @@ class TranscriptApp(rumps.App):
             default_text="\n".join(mailer.split_addresses(paths.setting("RECIPIENTS"))),
             ok="Save", cancel="Cancel", dimensions=(300, 90)).run()
         if answer.clicked:
-            entries = [line.strip() for line in answer.text.splitlines() if line.strip()]
-            paths.save_setting("RECIPIENTS", ", ".join(entries))
+            self.app.set_recipients(answer.text.splitlines())
 
-    def quit(self, sender, _arg=None):
-        if self.watcher:
-            self.watcher.stop()
+    def shutdown(self):
+        """Before the app goes, from the menu, the Dock or ⌘Q alike."""
+        self.app.stop()
         try:
             self.httpd.shutdown()
         except Exception:
             pass
+
+    def quit(self, sender, _arg=None):
         rumps.quit_application()
 
 
+class Delegate(rumps.rumps.NSApp):
+    """rumps' own application delegate, plus a click on the Dock icon."""
+
+    def applicationShouldHandleReopen_hasVisibleWindows_(self, _app, visible):
+        if not visible:
+            getattr(rumps.App, "*app_instance").window.show()
+        return True
+
+
 def run():
-    from AppKit import NSApplication, NSApplicationActivationPolicyAccessory
+    from AppKit import NSApplication, NSApplicationActivationPolicyRegular
+
+    import window
 
     main.init()
-    NSApplication.sharedApplication().setActivationPolicy_(
-        NSApplicationActivationPolicyAccessory)   # keep it out of the Dock
-    TranscriptApp().run()
+    app = NSApplication.sharedApplication()
+    app.setActivationPolicy_(NSApplicationActivationPolicyRegular)
+    app.setMainMenu_(window.main_menu())
+    rumps.rumps.NSApp = Delegate          # rumps builds its delegate from this name
+    instance = TranscriptApp()
+    AppHelper.callAfter(instance.window.show)
+    instance.run()
 
 
 if __name__ == "__main__":

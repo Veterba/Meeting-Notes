@@ -1,18 +1,18 @@
-"""Local HTTP API behind the review window.
+"""Local HTTP API behind the app window.
 
 Bound to 127.0.0.1 and gated by a token generated at startup, so nothing else on
-the machine can drive the pipeline through it. The window passes the token; the
-page never leaves the loopback interface. A request whose Host is anything but
-this server's own address is refused, so a web page cannot reach the API by
-pointing a domain of its own at 127.0.0.1.
+the machine can drive the app through it. The window passes the token; the page
+never leaves the loopback interface. A request whose Host is anything but this
+server's own address is refused, so a web page cannot reach the API by pointing a
+domain of its own at 127.0.0.1.
 
-The window reviews and sends one meeting's notes, and that is all this serves.
 A meeting is named by its hash; which file holds its notes is the history's
-business, so no path ever comes in from the page. Everything else — the folder,
-the model, the recipients, what to process and what to try again — lives in the
-menu bar, which calls the pipeline directly.
+business, so no path ever comes in from the page. A file or a folder is chosen
+in a native dialog the server opens itself. Everything the window can change goes
+through the same `Controller` the menu bar uses.
 """
 import json
+import mimetypes
 import re
 import secrets
 import threading
@@ -20,26 +20,31 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+import controller
 import history
 import mailer
 import paths
-import pipeline
 
-UI_DIR = paths.CODE / "ui"
+# The React build (ui/ is its source; npm run build writes ui/dist).
+UI_DIR = paths.CODE / "ui" / "dist"
 
 TOKEN = secrets.token_urlsafe(24)
 
-# /api/meeting/<hash> and /api/meeting/<hash>/send
-RE_MEETING = re.compile(r"^/api/meeting/([0-9a-f]{64})(/send)?$")
+# /api/meeting/<hash>, and what can be done to it
+RE_MEETING = re.compile(r"^/api/meeting/([0-9a-f]{64})(?:/(send|retry|reveal))?$")
 
 
-def state() -> dict:
+def state(app: controller.Controller) -> dict:
+    """Everything the window shows, in one poll."""
+    facts = app.facts(meetings=200)
     return {
-        "mail_mode": mailer.mail_mode(),
+        **{k: facts[k] for k in ("ollama_up", "model", "model_ready", "models",
+                                 "installed", "watching", "mail_mode", "meetings")},
+        "folder": str(facts["folder"]),
+        # Whatever the one worker is doing, whoever started it.
+        "job": facts["job"],
         "recipients": mailer.split_addresses(paths.setting("RECIPIENTS")),
-        # Whatever the one worker is doing, whoever started it, so a meeting the
-        # watcher picked up is visible while another one is being read.
-        "job": pipeline.WORKER.snapshot(),
+        "account": mailer.account(),
     }
 
 
@@ -49,8 +54,9 @@ def notes_file(meeting: str) -> Path:
     return Path(row["notes"]) if row and row["notes"] else None
 
 
-def save(path: Path, data: dict):
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+def decision(d) -> dict:
+    return {"ok": not d.error, "queued": d.queued, "meeting": d.meeting,
+            "status": d.status, "note": d.note, "error": d.error}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -58,6 +64,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass  # the pipeline log is the one that matters
+
+    @property
+    def app(self) -> controller.Controller:
+        return self.server.app
 
     # -------------------------------------------------- plumbing
 
@@ -83,47 +93,78 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length") or 0)
         return json.loads(self.rfile.read(n) or b"{}")
 
-    # -------------------------------------------------- routes
-
-    def do_GET(self):
-        u = urlparse(self.path)
-        if u.path in ("/", "/index.html") and self._own_host():
+    def _static(self, path: str):
+        """The page, with the token in it, or one of the build's own assets."""
+        if path in ("/", "/index.html"):
             html = (UI_DIR / "index.html").read_text(encoding="utf-8")
             return self._send(200, html.replace("__TOKEN__", TOKEN).encode("utf-8"),
                               "text/html; charset=utf-8")
+        assets = (UI_DIR / "assets").resolve()
+        file = (UI_DIR / path.lstrip("/")).resolve()
+        if file.parent != assets or not file.is_file():
+            return self._json({"error": "not found"}, 404)
+        ctype = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
+        return self._send(200, file.read_bytes(), ctype)
+
+    # -------------------------------------------------- routes
+
+    def do_GET(self):
+        path = urlparse(self.path).path
+        if not self._own_host():
+            return self._json({"error": "forbidden"}, 403)
+        if not path.startswith("/api/"):
+            return self._static(path)
         if not self._authorised():
             return self._json({"error": "forbidden"}, 403)
 
-        if u.path == "/api/state":
-            return self._json(state())
-        m = RE_MEETING.match(u.path)
+        if path == "/api/state":
+            return self._json(state(self.app))
+        m = RE_MEETING.match(path)
         if m and not m.group(2):
-            path = notes_file(m.group(1))
-            if not (path and path.exists()):
+            notes = notes_file(m.group(1))
+            if not (notes and notes.exists()):
                 return self._json({"error": "this meeting has no notes"}, 404)
-            return self._json(json.loads(path.read_text(encoding="utf-8")))
+            return self._json(json.loads(notes.read_text(encoding="utf-8")))
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
         if not self._authorised():
             return self._json({"error": "forbidden"}, 403)
-        m = RE_MEETING.match(urlparse(self.path).path)
-        if not m:
-            return self._json({"error": "not found"}, 404)
+        path = urlparse(self.path).path
         try:
             body = self._body()
         except Exception as e:
             return self._json({"error": f"bad request: {e}"}, 400)
-        meeting, sending = m.group(1), bool(m.group(2))
-        path = notes_file(meeting)
-        if not path:
-            return self._json({"error": "this meeting has no notes"}, 404)
 
+        m = RE_MEETING.match(path)
+        if m:
+            return self._meeting(m.group(1), m.group(2), body)
+        route = {"/api/pick": self._pick, "/api/folder": self._folder,
+                 "/api/settings": self._settings, "/api/account": self._account,
+                 "/api/account/test": self._account_test}.get(path)
+        if not route:
+            return self._json({"error": "not found"}, 404)
+        try:
+            return self._json(route(body))
+        except (KeyError, ValueError) as e:
+            return self._json({"error": f"bad request: {e}"}, 400)
+
+    def _meeting(self, meeting: str, action: str, body: dict):
+        if action == "retry":
+            return self._json(decision(self.app.retry(meeting)))
+        if action == "reveal":
+            error = self.app.reveal(meeting)
+            return self._json({"ok": not error, "error": error})
+
+        notes = notes_file(meeting)
+        if not notes:
+            return self._json({"error": "this meeting has no notes"}, 404)
         data = body["data"]
-        if sending:
+        if action == "send":
             data["recipients"] = body["recipients"]
-        save(path, data)                    # what was sent is what is kept
-        if not sending:
+        notes.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                         encoding="utf-8")      # what was sent is what is kept
+        if action != "send":
             return self._json({"ok": True})
         try:
             message = mailer.deliver(data, body["recipients"])
@@ -132,11 +173,50 @@ class Handler(BaseHTTPRequestHandler):
         history.mark_sent(meeting, body["recipients"])
         return self._json({"ok": True, "message": message})
 
+    # Each of these returns what the page is told.
 
-def serve() -> tuple:
+    def _pick(self, _body):
+        path = controller.ask_for_file()
+        if not path:
+            return {"ok": False, "cancelled": True}
+        return decision(self.app.submit(path))
+
+    def _folder(self, _body):
+        path = controller.ask_for_folder()
+        if not path:
+            return {"ok": False, "cancelled": True}
+        self.app.set_folder(path)
+        return {"ok": True}
+
+    def _settings(self, body):
+        """One or more of: watching, model, mail_mode, recipients."""
+        setters = {"watching": lambda v: self.app.set_watching(bool(v)),
+                   "model": self.app.set_model,
+                   "mail_mode": self.app.set_mail_mode,
+                   "recipients": self.app.set_recipients}
+        unknown = set(body) - set(setters)
+        if unknown:
+            raise KeyError(", ".join(sorted(unknown)))
+        for key, value in body.items():
+            setters[key](value)
+        return {"ok": True}
+
+    def _account(self, body):
+        problem = self.app.save_account(body["address"], body.get("password", ""))
+        return {"ok": not problem, "error": problem}
+
+    def _account_test(self, body):
+        # Sends one real message, from the account to itself — only ever from the
+        # button in the window.
+        ok, message = mailer.send_test(body["address"], body.get("password") or None)
+        return {"ok": ok, "message": message}
+
+
+def serve(app: controller.Controller) -> tuple:
     """Start the API on a free loopback port. Returns (url, token, httpd)."""
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
     httpd.daemon_threads = True
+    httpd.app = app
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     port = httpd.server_address[1]
     return f"http://127.0.0.1:{port}", TOKEN, httpd

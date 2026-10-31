@@ -2,14 +2,16 @@
 
 A Teams transcript becomes a set of meeting notes and an email draft, entirely on
 your Mac. The model is Ollama running locally — no cloud API, no Microsoft Graph,
-no data leaving the machine. It lives in the menu bar: drop a transcript in a
-folder, and a few minutes later the notes are waiting for you to read and send.
+no data leaving the machine. It is a full local app — a window with every
+meeting, its notes and the settings — plus a menu bar widget: drop a transcript
+in a folder, and a few minutes later the notes are waiting for you to read and send.
 
 Nothing is ever emailed without you pressing the button.
 
 ## Requirements
 
 - macOS 12 or later, Apple silicon or Intel
+- Node.js and npm, to build the window (`brew install node`)
 - [Ollama](https://ollama.com) — `brew install ollama`
 - Python 3.10+ (macOS ships one; `brew install python` also works)
 - Outlook for Mac, if you want drafts. A Gmail app password works instead.
@@ -36,8 +38,9 @@ Then open it — from Launchpad, Spotlight, or:
 open "/Applications/Meeting Notes.app"
 ```
 
-**The icon appears in the menu bar.** There is no Dock icon and no window until
-you ask for one: the app is a menu bar item by design (`LSUIElement`).
+**The window opens, with an icon in the Dock and one in the menu bar.** Closing
+the window keeps the app running in the menu bar; the Dock icon or *Open Meeting
+Notes* brings it back.
 
 ### First run
 
@@ -100,7 +103,8 @@ For hacking on it, skip the build:
 ./run.sh
 ```
 
-Same setup steps, but it runs `menubar.py` straight from the working tree. This
+Same setup steps, but it runs `menubar.py` straight from the working tree, and
+rebuilds the window (`npm run build` in `ui/`) when its source has changed. This
 is for development only — the app proper is the build. It is the same settings,
 notes and logs as the built app (see *Where everything lives*), so set
 `MEETING_NOTES_DATA` if you do not want to share them.
@@ -153,11 +157,12 @@ pick it up.
 ## How the app is put together
 
 ```
-menubar.py   the status bar item, the owner of everything
+menubar.py   the app: Dock, menu bar item, window, the owner of everything
+ ├ controller.py  what either front end can ask for — settings, watcher, meetings
  ├ menu.py    what the dropdown says and in what order — a plain function
  ├ server.py  a loopback HTTP API on a random port, gated by a startup token
  ├ window.py  an NSWindow with a WKWebView pointed at that API
- └ ui/        the page itself — plain HTML and JavaScript, no framework
+ └ ui/        the window's page — React, built with Vite into ui/dist
 pipeline.py  decide, summarise, queue watcher.py  stable files in one folder
 main.py      start-up and the CLI     parser.py  .vtt/.docx into speaker turns
 llm.py       Ollama, map-reduce       mailer.py  Jinja2, Outlook, SMTP
@@ -168,12 +173,28 @@ paths.py     folders, settings and their defaults
 The UI is served from `127.0.0.1` on a port the OS assigns, and every API call
 carries a token generated at startup, so nothing else on the machine can drive
 the pipeline through it. A request with any other Host header is refused. The
-API names a meeting by its hash (`/api/meeting/<hash>`, `…/send`); no file path
-ever comes in from the page.
+API names a meeting by its hash (`/api/meeting/<hash>`, `…/send`, `…/retry`,
+`…/reveal`); no file path ever comes in from the page — a file or folder is
+chosen in a dialog the server opens itself. Settings go through the same
+`Controller` the menu uses, so the two can never disagree.
 
-## The menu bar app
+## The window
 
-The dropdown is the app. It is a widget, not a window with a menu attached:
+The main window is the app: a sidebar (meetings, settings, *process a file…*,
+and the status — Ollama, model, watched folder, the job with a text progress
+bar), the meeting list with search and status filters, and the selected
+meeting's notes, editable, with *save* and *send*. Settings has the folder and
+the watch switch, the model, the mail mode and account, and the default
+recipients. The look is a night sky of cumulus, ordered-dithered into four inks, under one
+pane of glass;
+`prefers-reduced-motion` keeps it still.
+
+The page source is in `ui/src`; `cd ui && npm run build` rebuilds it, and
+`build.sh` / `run.sh` do that for you.
+
+## The menu bar widget
+
+The dropdown is the quick view of the same app:
 
 ```
 ● Ollama: running
@@ -181,6 +202,7 @@ Model: qwen3.5:9b
 Watching: ~/Downloads                  (or: paused)
 Now: sprint-review.vtt — part 2/5      (or: Idle, or: 2 waiting)
 ────────────────────────────────────
+Open Meeting Notes                     ⌘O
 Recent meetings ▸  ✓ Sprint review — 23 Sep
                    ● Payment gateway — 22 Sep
                    ✕ standup.vtt — 21 Sep
@@ -212,10 +234,9 @@ Quit
   is installed; picking one that is not downloads it. **Mail account…** is the
   sheet described below.
 
-**The window opens for one meeting and nothing else**: its notes, editable, the
-recipients, and one button. It has no settings and no file list — those are the
-menu's job. A notification arrives when notes are ready, and the email still does
-not go anywhere until you press the button.
+*Open notes…* brings the window up on that meeting. A notification arrives when
+notes are ready, and the email still does not go anywhere until you press the
+button.
 
 The icons live in `assets/icon.png` and `assets/icon-paused.png`; redraw both
 with `python assets/make_icon.py`.
@@ -466,7 +487,8 @@ Rebuilding is safe: user data lives in Application Support, not in the bundle.
 ## Repository layout
 
 ```
-menubar.py  menu.py  server.py  window.py  ui/   the app: icon, dropdown, API, window, page
+menubar.py  controller.py  menu.py  server.py  window.py   the app: Dock, dropdown, API, window
+ui/                               the window's page (React + Vite; ui/dist is built)
 pipeline.py watcher.py parser.py llm.py mailer.py   the pipeline, watcher and queue
 main.py                           start-up and the CLI
 history.py                        meetings by fingerprint (sqlite)
