@@ -85,7 +85,7 @@ export default function App() {
               </nav>
 
               <button className="primary" onClick={pickFile}>process a file…</button>
-              <Record recording={state.recording} refresh={refresh} say={say}
+              <Record recording={state.recording} call={state.call} refresh={refresh} say={say}
                       onStart={() => setView("live")} />
 
               <Status state={state} />
@@ -106,7 +106,10 @@ export default function App() {
 }
 
 // The call recorder's button. The clock and the meters live in the live view.
-function Record({ recording, refresh, say, onStart }) {
+// When a call app takes or lets go of the microphone, the offer sits above it.
+const OFFERS = { record: "is using the microphone", stop: "let go of the microphone — call over?" };
+
+function Record({ recording, call, refresh, say, onStart }) {
   const seconds = useElapsed(recording);
   async function toggle() {
     const starting = !recording.recording;
@@ -115,12 +118,22 @@ function Record({ recording, refresh, say, onStart }) {
     else if (starting) onStart();
     refresh();
   }
+  async function dismiss() {
+    await api("/api/call/dismiss", {});
+    refresh();
+  }
   return (
     <div className={`record ${recording.recording ? "on" : ""}`}>
-      <button onClick={toggle}>
+      {call.offer && (
+        <p className="offer">
+          <b>{call.app.toLowerCase()}</b> {OFFERS[call.offer]}
+          <button className="link" onClick={dismiss}>{call.offer === "stop" ? "keep going" : "not now"}</button>
+        </p>
+      )}
+      <button className={call.offer ? "offered" : ""} onClick={toggle}>
         {recording.recording
           ? <>■ stop <span className="clock">{clock(seconds)}</span></>
-          : "● record the call"}
+          : call.offer === "record" ? `● record the ${call.app.toLowerCase()} call` : "● record the call"}
       </button>
     </div>
   );

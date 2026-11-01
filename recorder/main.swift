@@ -17,6 +17,16 @@
 //   {"event":"error","what":"...","status":-1}
 //   {"event":"stopped","seconds":63.2}
 //
+//   mn-recorder --watch
+//
+// Records nothing: says which apps have the microphone open, by bundle id,
+// whenever that changes, so the app can offer to record a call. Read from Core
+// Audio's process objects (macOS 14+), which needs no permission. An app counts
+// as gone only after GONE_AFTER seconds without it, so a call that briefly
+// lets go of the microphone (switching devices) does not look like it ended.
+//   {"event":"mic","apps":["com.microsoft.teams2.helper"]}
+// It runs until its stdin closes.
+//
 // Built by build.sh into the app bundle, next to the app's own executable, so
 // the permission prompts name Meeting Notes and not whatever started it.
 
@@ -248,12 +258,72 @@ final class MicRecorder {
     }
 }
 
+// ------------------------------------------------------------------ watching the microphone
+
+/// Bundle ids of the processes that have an input running right now.
+func microphoneUsers() -> Set<String> {
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    var address = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList,
+                                             mScope: kAudioObjectPropertyScopeGlobal,
+                                             mElement: kAudioObjectPropertyElementMain)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(system, &address, 0, nil, &size) == noErr else { return [] }
+    var objects = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+    guard AudioObjectGetPropertyData(system, &address, 0, nil, &size, &objects) == noErr
+    else { return [] }
+    var users = Set<String>()
+    for object in objects {
+        guard (try? property(object, kAudioProcessPropertyIsRunningInput, UInt32(0))) == 1
+        else { continue }
+        var address = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyBundleID,
+                                                 mScope: kAudioObjectPropertyScopeGlobal,
+                                                 mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        var bundle: Unmanaged<CFString>?
+        if AudioObjectGetPropertyData(object, &address, 0, nil, &size, &bundle) == noErr,
+           let bundle {
+            let id = bundle.takeRetainedValue() as String
+            if !id.isEmpty { users.insert(id) }
+        }
+    }
+    return users
+}
+
+let GONE_AFTER = 3
+
+func watch() -> Never {
+    var held = Set<String>()            // what the app is told is using the microphone
+    var told: Set<String>? = nil
+    var missing: [String: Int] = [:]
+    let ticker = DispatchSource.makeTimerSource(queue: .main)
+    ticker.schedule(deadline: .now(), repeating: 1)
+    ticker.setEventHandler {
+        let now = microphoneUsers()
+        held.formUnion(now)
+        for id in held {
+            missing[id] = now.contains(id) ? nil : (missing[id] ?? 0) + 1
+            if missing[id] == GONE_AFTER { held.remove(id); missing[id] = nil }
+        }
+        if held != told {
+            say(["event": "mic", "apps": held.sorted()])
+            told = held
+        }
+    }
+    ticker.resume()
+    DispatchQueue.global().async {
+        while let _ = readLine() {}
+        exit(0)
+    }
+    dispatchMain()
+}
+
 // ------------------------------------------------------------------ run
 
 guard CommandLine.arguments.count == 2 else {
-    FileHandle.standardError.write("usage: mn-recorder <folder>\n".data(using: .utf8)!)
+    FileHandle.standardError.write("usage: mn-recorder <folder> | --watch\n".data(using: .utf8)!)
     exit(2)
 }
+if CommandLine.arguments[1] == "--watch" { watch() }
 let folder = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
 try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 

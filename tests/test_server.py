@@ -139,6 +139,18 @@ def test_settings_change_through_the_controller(api, app, temp_env):
     assert paths.setting("MAIL_MODE") == "smtp"
 
 
+def test_a_noticed_call_is_offered_and_can_be_dismissed(api, app, temp_env, monkeypatch):
+    monkeypatch.setattr(paths, "recorder_binary", lambda: temp_env.parent / "missing")
+    app.calls.using = {"Zoom"}
+    app._calls_changed({"Zoom"}, set())
+    state = api("GET", "/api/state")[1]
+    assert state["call"] == {"offer": "record", "app": "Zoom"} and state["call_detect"]
+    assert api("POST", "/api/call/dismiss", {}) == (200, {"ok": True})
+    assert api("GET", "/api/state")[1]["call"]["offer"] == ""
+    api("POST", "/api/settings", {"call_detect": False})
+    assert api("GET", "/api/state")[1]["call_detect"] is False
+
+
 def test_watching_starts_and_stops_the_one_watcher(api, app, temp_env, box):
     api("POST", "/api/settings", {"watching": True})
     assert app.watching and app.watcher is not None

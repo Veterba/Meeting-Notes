@@ -56,6 +56,8 @@ def state(app: controller.Controller) -> dict:
         "recipients": mailer.split_addresses(paths.setting("RECIPIENTS")),
         "account": mailer.account(),
         "recording": facts["recording"],
+        "call": facts["call"],
+        "call_detect": facts["call_detect"],
         "recordings": app.lone_recordings(),
         "archive": archive.entries(),
         "archive_days": archive.days(),
@@ -182,6 +184,7 @@ class Handler(BaseHTTPRequestHandler):
         route = {"/api/pick": self._pick, "/api/folder": self._folder,
                  "/api/settings": self._settings, "/api/account": self._account,
                  "/api/record": self._record,
+                 "/api/call/dismiss": self._dismiss_call,
                  "/api/account/test": self._account_test}.get(path)
         if not route:
             return self._json({"error": "not found"}, 404)
@@ -279,12 +282,14 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True}
 
     def _settings(self, body):
-        """One or more of: watching, model, mail_mode, recipients."""
+        """One or more of: watching, model, mail_mode, recipients, archive_days,
+        call_detect."""
         setters = {"watching": lambda v: self.app.set_watching(bool(v)),
                    "model": self.app.set_model,
                    "mail_mode": self.app.set_mail_mode,
                    "recipients": self.app.set_recipients,
-                   "archive_days": self.app.set_archive_days}
+                   "archive_days": self.app.set_archive_days,
+                   "call_detect": lambda v: self.app.set_call_detect(bool(v))}
         unknown = set(body) - set(setters)
         if unknown:
             raise KeyError(", ".join(sorted(unknown)))
@@ -294,6 +299,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _record(self, body):
         self.app.set_recording(bool(body["on"]))
+        return {"ok": True}
+
+    def _dismiss_call(self, _body):
+        self.app.dismiss_call()
         return {"ok": True}
 
     def _account(self, body):

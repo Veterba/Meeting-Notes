@@ -94,6 +94,8 @@ class TranscriptApp(rumps.App):
         self.app = Controller()
         self.app.on_change = lambda: on_main(self.changed)
         self.app.on_notice = lambda title, message: on_main(notify, title, message)
+        self.app.on_offer = lambda offer, app: on_main(self.offer, offer, app)
+        rumps.notifications(self.notification_clicked)
         pipeline.WORKER.on_event = self.on_job_event
 
         import server
@@ -151,7 +153,7 @@ class TranscriptApp(rumps.App):
         for line, item in zip(menu.status_lines(facts), self.status_items):
             item.title = line
         if self.record_item:                # the running clock while recording
-            self.record_item.title = menu.record_item(facts["recording"]).title
+            self.record_item.title = menu.record_item(facts["recording"], facts["call"]).title
 
     @rumps.timer(20)
     def probe_timer(self, _):
@@ -177,6 +179,29 @@ class TranscriptApp(rumps.App):
         elif kind == "pull":
             notify("Model downloaded", name)
         self.rebuild()
+
+    # ------------------------------------------------------------ a call noticed
+
+    OFFERS = {"record": ("{app} is using the microphone", "Record the call?", "Record"),
+              "stop": ("The {app} call seems over", "Stop recording?", "Stop")}
+
+    def offer(self, offer, app):
+        """A notification with a button. Main thread only."""
+        title, message, button = self.OFFERS[offer]
+        try:
+            rumps.notification(title.format(app=app), "", message, data={"offer": offer},
+                               action_button=button, other_button="Not now")
+        except Exception:               # unbundled: no buttons, the window still offers
+            notify(title.format(app=app), message)
+
+    def notification_clicked(self, notification):
+        """The button records or stops, if that is still what is on offer; a click
+        anywhere else opens the window, whose banner says the same."""
+        offer = (notification.data or {}).get("offer")
+        if notification.activation_type != "action_button_clicked":
+            self.window.show()
+        elif offer and offer == self.app.call["offer"]:
+            self.toggle_recording(None)
 
     # ------------------------------------------------------------ actions
 

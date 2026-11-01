@@ -230,6 +230,13 @@ two small models, about 30 MB, downloaded the first time) and their lines become
 well, without running the model again. The model itself is told the speakers are
 unnamed and uses a name only when the conversation gives one, as an assumption.
 
+**Noticing a call.** When Teams, Zoom or a browser (Chrome, Arc, Edge, Safari,
+Firefox, Brave) starts using the microphone, a notification offers to record the
+call, and the record button in the window and the menu names it. When the call app
+lets go of the microphone while recording, it offers to stop. Both are only offers:
+nothing records or stops without your click. Settings → *calls* turns this off.
+A browser counts whatever it uses the microphone for, not only calls.
+
 **Transcribe again** runs the speech model over a call's whole recording, for
 when the live transcript missed things; the meeting is then summarised again. A
 recording in which nothing was recognised still shows in the list, so it can be

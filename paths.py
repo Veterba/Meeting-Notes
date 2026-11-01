@@ -53,6 +53,8 @@ DEFAULTS = {
     "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
     # recording
     "WHISPER_MODEL": "", "WHISPER_LANGUAGE": "auto",
+    # offer to record when Teams, Zoom or a browser starts using the microphone
+    "CALL_DETECT": "1",
     # deleted meetings stay in the archive this many days: 7, 30 or 90
     "ARCHIVE_DAYS": 30,
     # mail

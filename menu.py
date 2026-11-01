@@ -133,10 +133,13 @@ def settings_items(facts: dict) -> list:
     ]
 
 
-def record_item(recording: dict) -> Item:
-    """● Record, or ■ Stop recording with how long it has been going."""
+def record_item(recording: dict, call: dict = None) -> Item:
+    """● Record (naming the call app when one was noticed), or ■ Stop recording
+    with how long it has been going."""
     if not recording.get("recording"):
-        return Item("● Record the call", action="toggle_recording")
+        offered = (call or {}).get("offer") == "record"
+        return Item(f"● Record the {call['app']} call" if offered else "● Record the call",
+                    action="toggle_recording")
     started = recording.get("started_at")
     seconds = int(time.time() - started if started else recording.get("seconds") or 0)
     return Item(f"■ Stop recording  {seconds // 60:02d}:{seconds % 60:02d}",
@@ -149,7 +152,7 @@ def tree(facts: dict) -> list:
     items += [
         SEPARATOR,
         Item("Open Meeting Notes", action="open_window", key="o"),
-        record_item(facts.get("recording") or {}),
+        record_item(facts.get("recording") or {}, facts.get("call")),
         Item("Recent meetings", children=tuple(meeting_items(facts.get("meetings")))),
         Item("Process a file…", action="pick_file"),
         Item("Watch the folder", action="toggle_watching",

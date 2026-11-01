@@ -6,6 +6,14 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.8.0 — 2026-11-01
+### Added
+- Call detection: when Teams, Zoom or a browser starts using the microphone, a notification
+  offers *Record*, and the window and the menu name the call. When the call app lets go of the
+  microphone during a recording, it offers *Stop*. It never records or stops by itself.
+- `mn-recorder --watch` reports which apps hold the microphone (Core Audio process objects,
+  no permission needed). Settings → *calls* turns it off (`CALL_DETECT`).
+
 ## v0.7.1 — 2026-11-01
 ### Changed
 - New app icon in the Microsoft 365 manner: on a light plate, a sheet of violet bands and an

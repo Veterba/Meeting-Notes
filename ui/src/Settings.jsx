@@ -62,6 +62,15 @@ export default function Settings({ state, refresh, say }) {
 
       <Recipients state={state} change={change} />
 
+      <Group title="calls" hint="When Teams, Zoom or a browser starts using the microphone, offer to record the call: a notification, and a note above the record button. It never records by itself.">
+        <label className="switch">
+          <input type="checkbox" checked={state.call_detect}
+                 onChange={(e) => change({ call_detect: e.target.checked })} />
+          <span className="knob" />
+          offer to record calls
+        </label>
+      </Group>
+
       <Group title="archive" hint="A deleted meeting — its notes and its recording — waits in the archive this long, then goes for good. Until then it can be restored.">
         <div className="segments">
           {[[7, "a week"], [30, "a month"], [90, "3 months"]].map(([n, label]) => (

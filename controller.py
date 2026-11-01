@@ -17,6 +17,7 @@ import mailer
 import paths
 import pipeline
 import speakers
+from calls import CallWatch
 from menu import MAIL_MODES
 from recorder import Recorder
 from transcriber import Live
@@ -48,8 +49,13 @@ class Controller:
                     "model_ready": False, "models": [], "installed": []}
         self.on_change = None           # on_change()
         self.on_notice = None           # on_notice(title, message)
+        self.on_offer = None            # on_offer(offer, app): "record" or "stop"
         self.recorder = Recorder()
         self.recorder.on_event = self._recording_event
+        self.calls = CallWatch(self._calls_changed)
+        # What the app offers about a call it noticed: "record" while not
+        # recording, "stop" when the call app let go of the microphone.
+        self.call = {"offer": "", "app": ""}
         self.retranscribing = {}        # recording name -> what it is doing
         self._lock = threading.Lock()
 
@@ -62,7 +68,8 @@ class Controller:
     def status_facts(self) -> dict:
         """Cheap enough to ask every two seconds: no network, no sqlite."""
         return {**self.net, "watching": self.watching, "folder": paths.inbox(),
-                "job": pipeline.WORKER.snapshot(), "recording": self.recorder.snapshot()}
+                "job": pipeline.WORKER.snapshot(), "recording": self.recorder.snapshot(),
+                "call": dict(self.call), "call_detect": paths.flag("CALL_DETECT")}
 
     def facts(self, meetings: int = 7) -> dict:
         return {**self.status_facts(), "mail_mode": mailer.mail_mode(),
@@ -101,6 +108,8 @@ class Controller:
 
     def start(self):
         self.apply_watch_state()
+        if paths.flag("CALL_DETECT"):
+            self.calls.start()
         threading.Thread(target=self._startup_checks, daemon=True).start()
         threading.Thread(target=self._purge_loop, daemon=True).start()
 
@@ -139,6 +148,7 @@ class Controller:
             self._changed()
 
     def stop(self):
+        self.calls.stop()
         self.recorder.stop()
         with self._lock:
             if self.watcher:
@@ -197,6 +207,13 @@ class Controller:
         paths.save_setting("RECIPIENTS", ", ".join(entries))
         self._changed()
 
+    def set_call_detect(self, on: bool):
+        paths.save_setting("CALL_DETECT", "1" if on else "0")
+        self.calls.stop()
+        if on:
+            self.calls.start()
+        self._offer("", "")
+
     def set_archive_days(self, value):
         if int(value) not in archive.CHOICES:
             raise ValueError(f"keep the archive {', '.join(map(str, archive.CHOICES))} days")
@@ -218,10 +235,36 @@ class Controller:
             self.recorder.start()
         elif not on:
             self.recorder.stop()
+        self._offer("", "")
+
+    # A call app taking or letting go of the microphone. Only ever an offer:
+    # recording starts and stops on the user's click.
+
+    def _calls_changed(self, started: set, ended: set):
+        offer, app = self.call["offer"], self.call["app"]
+        if self.recorder.recording:
+            if ended and not self.calls.using:
+                self._offer("stop", min(ended))
+            elif started and offer == "stop":
+                self._offer("", "")         # it was only switching devices
+        elif started and offer != "record":
+            self._offer("record", min(started))
+        elif offer == "record" and app in ended:
+            self._offer("", "")             # the call ended without being recorded
+
+    def _offer(self, offer: str, app: str):
+        self.call = {"offer": offer, "app": app}
+        if offer:
+            log.info("Call: %s offered for %s", offer, app)
+            self._call(self.on_offer, offer, app)
         self._changed()
+
+    def dismiss_call(self):
+        self._offer("", "")
 
     def _recording_event(self, kind, folder, message):
         if kind == "error":
+            self.call = {"offer": "", "app": ""}
             self._notice("Recording failed", message)
         elif kind == "warning":
             self._notice("Recording problem", message)
