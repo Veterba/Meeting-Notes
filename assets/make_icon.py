@@ -95,49 +95,8 @@ for name, fn in (("icon.png", glyph), ("icon-paused.png", paused)):
 
 
 # ---------------------------------------------------------------- app icon
-
-BRAND = (0.13, 0.42, 0.85)      # the rounded square behind the glyph
-
-
-def glyph_scaled(x, y, size):
-    """The same page drawn in a 40-unit space, scaled into `size` and inset."""
-    inset = size * 0.235
-    span = size - 2 * inset
-    if span <= 0:
-        return False
-    return glyph((x - inset) * 40 / span, (y - inset) * 40 / span)
-
-
-def app_sample(x, y, size):
-    """One supersample of the app icon, as premultiplied RGBA floats."""
-    r = size * 0.2237                                   # macOS squircle radius
-    if sd_round_rect(x, y, size / 2, size / 2, size * 0.455, size * 0.455, r) > 0:
-        return (0.0, 0.0, 0.0, 0.0)
-    if glyph_scaled(x, y, size):
-        return (1.0, 1.0, 1.0, 1.0)
-    return (*BRAND, 1.0)
-
-
-def render_app(size):
-    rows = []
-    for py in range(size):
-        row = bytearray()
-        for px in range(size):
-            acc = [0.0, 0.0, 0.0, 0.0]
-            for sy in range(SS):
-                for sx in range(SS):
-                    s = app_sample(px + (sx + 0.5) / SS, py + (sy + 0.5) / SS, size)
-                    for k in range(4):
-                        acc[k] += s[k]
-            n = SS * SS
-            a = acc[3] / n
-            if a <= 0:
-                row += bytes((0, 0, 0, 0))
-            else:   # un-premultiply so the PNG stores straight alpha
-                row += bytes(tuple(round(255 * min(1.0, acc[k] / n / a)) for k in range(3))
-                             + (round(255 * a),))
-        rows.append(bytes(row))
-    return rows
+# The app icon needs a real blur for its glass, so app_icon.swift draws it with
+# CoreGraphics and CoreImage; here it is only cut into the sizes macOS wants.
 
 
 def build_icns():
@@ -147,10 +106,14 @@ def build_icns():
     iconset = here / "AppIcon.iconset"
     shutil.rmtree(iconset, ignore_errors=True)
     iconset.mkdir()
+    master = iconset / "icon_512x512@2x.png"
+    subprocess.run(["swift", str(here / "app_icon.swift"), str(master)], check=True)
     for base in (16, 32, 128, 256, 512):
         for scale, suffix in ((1, ""), (2, "@2x")):
-            px = base * scale
-            write_png(iconset / f"icon_{base}x{base}{suffix}.png", render_app(px))
+            out = iconset / f"icon_{base}x{base}{suffix}.png"
+            if out != master:
+                subprocess.run(["sips", "-z", str(base * scale), str(base * scale), str(master),
+                                "--out", str(out)], check=True, capture_output=True)
     out = here / "AppIcon.icns"
     subprocess.run(["iconutil", "-c", "icns", str(iconset), "-o", str(out)], check=True)
     shutil.rmtree(iconset, ignore_errors=True)

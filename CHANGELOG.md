@@ -6,6 +6,12 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.7.1 — 2026-11-01
+### Changed
+- New app icon in the Microsoft 365 manner: on a light plate, a sheet of violet bands and an
+  indigo tile with a white waveform. Drawn at build time by `assets/app_icon.swift`
+  (CoreGraphics); the menu bar icon is unchanged.
+
 ## v0.7.0 — 2026-11-01
 ### Added
 - After a call, the other side's voices are told apart (sherpa-onnx speaker diarization, about
