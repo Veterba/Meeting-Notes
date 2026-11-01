@@ -48,8 +48,8 @@ def state(app: controller.Controller) -> dict:
     for m in facts["meetings"]:
         m["recorded"] = Path(m["source"]).is_relative_to(recordings)
     return {
-        **{k: facts[k] for k in ("ollama_up", "model", "model_ready", "models",
-                                 "installed", "watching", "mail_mode", "meetings")},
+        **{k: facts[k] for k in ("ollama_up", "model", "model_ready",
+                                 "watching", "mail_mode", "meetings")},
         "folder": str(facts["folder"]),
         # Whatever the one worker is doing, whoever started it.
         "job": facts["job"],
@@ -185,6 +185,7 @@ class Handler(BaseHTTPRequestHandler):
                  "/api/settings": self._settings, "/api/account": self._account,
                  "/api/record": self._record,
                  "/api/call/dismiss": self._dismiss_call,
+                 "/api/model/download": self._download_model,
                  "/api/account/test": self._account_test}.get(path)
         if not route:
             return self._json({"error": "not found"}, 404)
@@ -282,10 +283,9 @@ class Handler(BaseHTTPRequestHandler):
         return {"ok": True}
 
     def _settings(self, body):
-        """One or more of: watching, model, mail_mode, recipients, archive_days,
+        """One or more of: watching, mail_mode, recipients, archive_days,
         call_detect."""
         setters = {"watching": lambda v: self.app.set_watching(bool(v)),
-                   "model": self.app.set_model,
                    "mail_mode": self.app.set_mail_mode,
                    "recipients": self.app.set_recipients,
                    "archive_days": self.app.set_archive_days,
@@ -299,6 +299,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def _record(self, body):
         self.app.set_recording(bool(body["on"]))
+        return {"ok": True}
+
+    def _download_model(self, _body):
+        self.app.download_model()
         return {"ok": True}
 
     def _dismiss_call(self, _body):

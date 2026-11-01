@@ -79,6 +79,9 @@ export default function App() {
                 <button className={view === "meetings" ? "on" : ""} onClick={() => setView("meetings")}>
                   meetings<span className="count">{state.meetings.length || ""}</span>
                 </button>
+                <button className={view === "archived" ? "on" : ""} onClick={() => setView("archived")}>
+                  archived<span className="count">{state.archive.length || ""}</span>
+                </button>
                 <button className={view === "settings" ? "on" : ""} onClick={() => setView("settings")}>
                   settings
                 </button>
@@ -92,8 +95,10 @@ export default function App() {
             </aside>
 
             <main className="card">
-              {view === "meetings" && <Meetings state={state} selected={selected} onSelect={setSelected}
-                                                refresh={refresh} say={say} />}
+              {(view === "meetings" || view === "archived") && (
+                <Meetings key={view} state={state} archive={view === "archived"} selected={selected}
+                          onSelect={setSelected} refresh={refresh} say={say} />
+              )}
               {view === "live" && <Live recording={state.recording} refresh={refresh} say={say} />}
               {view === "settings" && <Settings state={state} refresh={refresh} say={say} />}
             </main>

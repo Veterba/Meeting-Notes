@@ -109,21 +109,11 @@ def meeting_items(meetings) -> list:
     return items
 
 
-def model_items(facts: dict) -> list:
-    """The models to choose from, the installed ones ticked."""
-    installed = facts.get("installed") or []
-    items = []
-    for name in facts.get("models") or []:
-        label = name if name in installed else f"{name}  (download)"
-        items.append(Item(label, action="choose_model", arg=name,
-                          checked=name == facts.get("model")))
-    return items or [Item("Ollama is not answering")]
-
-
 def settings_items(facts: dict) -> list:
+    missing = facts.get("ollama_up") and not facts.get("model_ready")
     return [
         Item("Folder…", action="choose_folder"),
-        Item("Model", children=tuple(model_items(facts))),
+        *([Item(f"Download {facts.get('model')}…", action="download_model")] if missing else []),
         Item("Mail", children=tuple(
             Item(label, action="choose_mail", arg=mode,
                  checked=facts.get("mail_mode") == mode)

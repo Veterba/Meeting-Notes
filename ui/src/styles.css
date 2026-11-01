@@ -186,9 +186,6 @@ nav .live-nav.on { color: var(--cloud); }
 .search { height: 30px; font: 12px var(--mono); }
 .filters { display: flex; gap: 2px; }
 .archive-title { font: 11px/22px var(--mono); color: var(--haze); padding: 0 6px; }
-.archive-toggle { margin: var(--s2); background: none; border-color: transparent; color: var(--haze-2);
-  font-size: 11px; height: 26px; text-align: left; }
-.archive-toggle:hover, .archive-toggle.on { color: var(--cloud); background: var(--hover); }
 .filters button { height: 22px; padding: 0 6px; font-size: 11px; background: none;
   border-color: transparent; color: var(--haze-2); }
 .filters button:hover { color: var(--cloud); }

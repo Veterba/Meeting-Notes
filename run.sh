@@ -68,12 +68,12 @@ if ! curl -sf -m 3 http://localhost:11434/api/tags >/dev/null; then
 fi
 
 # --- model --------------------------------------------------------------
-MODEL=$("$PY" -c "import llm; print(llm.default_model())")
+MODEL=$("$PY" -c "import llm; print(llm.MODEL)")
 if ! "$PY" -c "import llm,sys; sys.exit(0 if llm.has_model('$MODEL') else 1)"; then
   say "Model $MODEL is not downloaded"
   read -r -p "    Download it now? That is several GB. [Y/n] " answer
   case "${answer:-Y}" in
-    [Nn]*) echo "    Skipped. Pick another model from the menu, or run: ollama pull $MODEL" ;;
+    [Nn]*) echo "    Skipped. Download it from the window's settings, or run: ollama pull $MODEL" ;;
     *)     ollama pull "$MODEL" ;;
   esac
 fi

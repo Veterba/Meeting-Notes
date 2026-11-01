@@ -12,7 +12,6 @@ from helpers import fake_summarize, wait_until
 
 FACTS = {
     "ollama_up": True, "model": "qwen3.5:9b", "model_ready": True,
-    "models": ["qwen3.5:9b", "qwen3:14b"], "installed": ["qwen3.5:9b"],
     "watching": True, "folder": Path.home() / "Downloads", "mail_mode": "smtp",
     "job": {"active": False, "queued": 0, "stage": "", "file": "", "i": 0, "n": 0},
     "meetings": [],
@@ -172,23 +171,19 @@ def test_the_date_is_shown_the_short_way():
 def test_the_settings_submenu_ticks_what_is_in_use():
     settings = menu.settings_items(FACTS)
 
-    assert titles(settings) == ["Folder…", "Model", "Mail", "Mail account…",
-                                "Default recipients…"]
+    assert titles(settings) == ["Folder…", "Mail", "Mail account…", "Default recipients…"]
     assert find(settings, "Mail account…").action == "mail_account"
-    models = find(settings, "Model").children
-    assert [(m.title, m.checked) for m in models] == [
-        ("qwen3.5:9b", True), ("qwen3:14b  (download)", False)]
-    assert [m.arg for m in models] == ["qwen3.5:9b", "qwen3:14b"]
     mail = find(settings, "Mail").children
     assert [(m.title, m.checked, m.arg) for m in mail] == [
         ("Draft in Outlook", False, "outlook_draft"),
         ("Send over SMTP", True, "smtp")]
 
 
-def test_the_model_list_says_so_when_ollama_is_not_answering():
-    items = menu.model_items(dict(FACTS, models=[], installed=[]))
-    assert titles(items) == ["Ollama is not answering"]
-    assert items[0].action is None
+def test_a_missing_model_can_be_downloaded_from_the_menu():
+    settings = menu.settings_items(dict(FACTS, model_ready=False))
+    assert find(settings, "Download qwen3.5:9b…").action == "download_model"
+    # Without Ollama there is nothing to download it with.
+    assert titles(menu.settings_items(dict(FACTS, ollama_up=False, model_ready=False)))[1] == "Mail"
 
 
 # ---------------------------------------------------------------- from the db

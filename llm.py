@@ -1,4 +1,4 @@
-"""Local Ollama: model choice, map-reduce, schema-constrained JSON."""
+"""Local Ollama: the one model, map-reduce, schema-constrained JSON."""
 import json
 import re
 import shutil
@@ -24,14 +24,12 @@ def timeout() -> int:
     return int(paths.number("REQUEST_TIMEOUT"))
 
 
-# The threshold is not the size of the model file but weights plus the KV cache
-# for NUM_CTX, and all of it has to fit in memory at once: 14b at 32k context is
-# ~12 GB resident, which on a 16 GB machine swaps (measured: a three-turn file
-# took three minutes instead of fifteen seconds). Check with `ollama ps` —
-# anything other than "100% GPU" in the PROCESSOR column means offload to CPU.
-MODEL_BIG = "qwen3:30b-a3b"      # 24 GB and up
-MODEL_MID = "qwen3:14b"          # 20 GB and up
-MODEL_SMALL = "qwen3.5:9b"       # below 20 GB
+# The one model. What has to fit in memory is the weights plus the KV cache for
+# NUM_CTX: 14b at 32k context is ~12 GB resident and swaps on a 16 GB Mac
+# (a three-turn file took three minutes instead of fifteen seconds), so the
+# notes are written by 9b and the prompts are tuned for it. Check with
+# `ollama ps`: anything but "100% GPU" in the PROCESSOR column means offload.
+MODEL = "qwen3.5:9b"
 ACTION_ITEM = {
     "type": "object",
     "properties": {
@@ -49,8 +47,8 @@ SUMMARY_SCHEMA = {
         "date": {"type": "string"},
         "participants": {"type": "array", "items": {"type": "string"}},
         "summary": {"type": "string"},
-        "decisions": {"type": "array", "items": {"type": "string"}},
         "action_items": {"type": "array", "items": ACTION_ITEM},
+        "decisions": {"type": "array", "items": {"type": "string"}},
         "assumptions": {
             "type": "array",
             "items": {
@@ -65,9 +63,12 @@ SUMMARY_SCHEMA = {
         },
         "open_questions": {"type": "array", "items": {"type": "string"}},
     },
+    # The order is the order the model writes them in. Tasks come before
+    # decisions: written the other way round, the tasks went into decisions and
+    # were then left out of action_items.
     "required": [
-        "title", "date", "participants", "summary", "decisions",
-        "action_items", "assumptions", "open_questions",
+        "title", "date", "participants", "summary", "action_items",
+        "decisions", "assumptions", "open_questions",
     ],
 }
 
@@ -75,36 +76,16 @@ MAP_SCHEMA = {
     "type": "object",
     "properties": {
         "facts": {"type": "array", "items": {"type": "string"}},
-        "decisions": {"type": "array", "items": {"type": "string"}},
         "action_items": {"type": "array", "items": ACTION_ITEM},
+        "decisions": {"type": "array", "items": {"type": "string"}},
         "quotes": {"type": "array", "items": {"type": "string"}},
         "open_questions": {"type": "array", "items": {"type": "string"}},
     },
-    "required": ["facts", "decisions", "action_items", "quotes", "open_questions"],
+    "required": ["facts", "action_items", "decisions", "quotes", "open_questions"],
 }
 
 
 # ---------------------------------------------------------------- environment
-
-def ram_gb() -> float:
-    try:
-        out = subprocess.run(["sysctl", "-n", "hw.memsize"], capture_output=True, text=True)
-        return int(out.stdout.strip()) / (1024 ** 3)
-    except Exception:
-        return 0.0
-
-
-def default_model() -> str:
-    chosen = paths.setting("OLLAMA_MODEL").strip()
-    if chosen:
-        return chosen
-    ram = ram_gb()
-    if ram >= paths.number("RAM_FOR_BIG"):
-        return MODEL_BIG
-    if ram >= paths.number("RAM_FOR_MID"):
-        return MODEL_MID
-    return MODEL_SMALL
-
 
 def ollama_up() -> bool:
     try:
@@ -155,15 +136,6 @@ def has_model(name: str, installed: list = None) -> bool:
     """Is the model downloaded? Ollama lists a bare name with ":latest" added."""
     models = installed_models() if installed is None else installed
     return name in models or f"{name}:latest" in models
-
-
-def model_choices(installed: list) -> list:
-    """What the menu offers: the current model, the three sizes, then the rest."""
-    choices = []
-    for name in [default_model(), MODEL_SMALL, MODEL_MID, MODEL_BIG] + installed:
-        if name and name not in choices:
-            choices.append(name)
-    return choices
 
 
 def pull_model(name: str, progress_cb=None):
@@ -316,7 +288,7 @@ def summarize(turns, meta: dict, model: str = None, progress_cb=None) -> dict:
     """Turns -> the final JSON described by SUMMARY_SCHEMA."""
     from parser import UNKNOWN, speakers, to_text
 
-    model = model or default_model()
+    model = model or MODEL
     full = to_text(turns)
     named = [s for s in speakers(turns) if s != UNKNOWN]
     who = (", ".join(named) if meta.get("named", True) else

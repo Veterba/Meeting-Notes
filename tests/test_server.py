@@ -121,7 +121,7 @@ def test_the_page_and_its_assets_are_served_and_nothing_else(api):
 def test_the_state_has_what_the_window_shows(api, meeting):
     status, state = api("GET", "/api/state")
     assert status == 200
-    assert {"ollama_up", "model", "models", "installed", "watching", "folder",
+    assert {"ollama_up", "model", "model_ready", "watching", "folder",
             "mail_mode", "recipients", "account", "job", "meetings"} <= set(state)
     assert [m["hash"] for m in state["meetings"]] == [meeting]
 
@@ -158,31 +158,26 @@ def test_watching_starts_and_stops_the_one_watcher(api, app, temp_env, box):
     assert not app.watching and app.watcher is None
 
 
-def test_choosing_a_model_downloads_only_a_missing_one(api, app, temp_env, worker,
-                                                        monkeypatch):
+def test_the_model_is_downloaded_only_when_missing(api, app, worker, monkeypatch):
     monkeypatch.setattr(app, "probe", lambda: None)
     pulled = []
     monkeypatch.setattr(llm, "pull_model", lambda name, cb=None: pulled.append(name))
-    app.net.update(ollama_up=True, installed=["qwen3.5:9b"])
-
-    api("POST", "/api/settings", {"model": "qwen3.5:9b"})
-    api("POST", "/api/settings", {"model": "qwen3:14b"})
-
-    assert paths.setting("OLLAMA_MODEL") == "qwen3:14b"
-    assert wait_until(lambda: pulled == ["qwen3:14b"])
+    app.net.update(ollama_up=True, model_ready=True)
+    assert api("POST", "/api/model/download", {}) == (200, {"ok": True})
+    app.net.update(model_ready=False)
+    api("POST", "/api/model/download", {})
+    assert wait_until(lambda: pulled == [llm.MODEL])
 
 
-def test_no_model_is_chosen_or_downloaded_while_ollama_is_down(api, app, temp_env, worker,
-                                                                 monkeypatch):
+def test_no_model_is_downloaded_while_ollama_is_down(api, app, worker, monkeypatch):
     pulled = []
     monkeypatch.setattr(llm, "pull_model", lambda name, cb=None: pulled.append(name))
     app.net.update(ollama_up=False)
-    before = paths.setting("OLLAMA_MODEL")
 
-    status, r = api("POST", "/api/settings", {"model": "qwen3:14b"})
+    status, r = api("POST", "/api/model/download", {})
 
     assert status == 400 and "Ollama" in r["error"]
-    assert paths.setting("OLLAMA_MODEL") == before and pulled == []
+    assert pulled == []
 
 
 def test_a_file_is_picked_in_a_dialog_the_server_opens(api, box, worker, monkeypatch,

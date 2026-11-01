@@ -304,8 +304,7 @@ class Worker:
             if not self._wait_for_ollama(t):
                 return
             try:
-                out = process(t, model=paths.setting("OLLAMA_MODEL") or None,
-                              progress_cb=progress)
+                out = process(t, progress_cb=progress)
             except llm.UNREACHABLE as e:
                 # It went away mid-run. Still not a failure — wait and start over.
                 log.warning("Ollama unreachable during %s, will retry: %s", t.src.name, e)

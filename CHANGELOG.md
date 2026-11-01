@@ -6,6 +6,16 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.9.0 — 2026-11-01
+### Changed
+- One model, `qwen3.5:9b`: the model choice, `OLLAMA_MODEL` and the RAM thresholds are gone;
+  settings and the menu only offer to download it when it is missing.
+- Better notes from 9b: a task someone takes on themselves ("I'll send it tomorrow") becomes an
+  action item; tasks are no longer repeated as decisions; a turned-down proposal is not a
+  decision; "nobody knows yet" goes to open questions; tasks noted in several parts of a long
+  meeting are merged. The model now writes action items before decisions.
+- *archived* is its own place in the sidebar, under *meetings*.
+
 ## v0.8.0 — 2026-11-01
 ### Added
 - Call detection: when Teams, Zoom or a browser starts using the microphone, a notification

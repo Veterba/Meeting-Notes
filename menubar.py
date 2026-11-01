@@ -247,11 +247,11 @@ class TranscriptApp(rumps.App):
         if path:
             self.app.set_folder(path)
 
-    def choose_model(self, sender, name):
+    def download_model(self, sender, _arg=None):
         try:
-            self.app.set_model(name)
+            self.app.download_model()
         except ValueError as e:
-            notify("Cannot change the model", str(e))
+            notify("Cannot download the model", str(e))
 
     def choose_mail(self, sender, mode):
         self.app.set_mail_mode(mode)

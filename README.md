@@ -81,15 +81,12 @@ System Settings → Privacy & Security → Automation.
 The app offers to download it, or do it yourself:
 
 ```bash
-ollama pull qwen3.5:9b      # or whichever model the table below lands on
+ollama pull qwen3.5:9b
 ```
 
-The model is picked from installed memory (`sysctl hw.memsize`): **24 GB and up →
-`qwen3:30b-a3b`**, **20 GB and up → `qwen3:14b`**, otherwise **`qwen3.5:9b`**.
-The thresholds are `RAM_FOR_BIG` / `RAM_FOR_MID` in `.env`.
-
-Those thresholds come from measurement, not from the size of the model file.
-What has to fit in memory is the weights **plus the KV cache for `NUM_CTX`**.
+There is one model, `qwen3.5:9b`, and the prompts are tuned for it. Bigger ones
+were dropped because of memory: what has to fit is the weights **plus the KV
+cache for `NUM_CTX`**.
 On a 16 GB machine `qwen3:14b` at `num_ctx=32768` takes 12 GB resident, swaps,
 and turns a three-turn meeting into a three-minute wait instead of fifteen
 seconds. There is one check: `ollama ps`, the `PROCESSOR` column. Anything other
@@ -245,8 +242,8 @@ transcribed again or deleted.
 ## Deleting
 
 *Delete* on a meeting moves its notes — and, for a recorded call, the whole
-recording — into `archive/` in the data folder. The *archive* at the bottom of
-the list shows what is there and restores it. After a week, a month or three
+recording — into `archive/` in the data folder. *archived* in the sidebar, under
+*meetings*, shows what is there and restores it. After a week, a month or three
 months (Settings ▸ archive, `ARCHIVE_DAYS`) it is removed for good. A downloaded
 transcript is never moved or deleted; the history remembers it as deleted, so
 the watcher does not summarise it again.
@@ -289,8 +286,8 @@ Quit
   page with a line struck through it, so the menu bar says at a glance whether
   anything is running. A job already in progress is left to finish;
 - **Settings** writes to `.env`, which the menu, the window and the CLI all read,
-  so a change takes effect at once and with no restart. The model list ticks what
-  is installed; picking one that is not downloads it. **Mail account…** is the
+  so a change takes effect at once and with no restart. While the model is not
+  downloaded, *Download qwen3.5:9b…* fetches it. **Mail account…** is the
   sheet described below.
 
 *Open notes…* brings the window up on that meeting. A notification arrives when

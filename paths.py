@@ -47,8 +47,7 @@ DEFAULTS = {
     # is this a transcript at all
     "MIN_TURNS": 4, "MIN_CHARS": 400, "MIN_TURNS_PER_SPEAKER": 2.0, "MIN_NAME_RATIO": 0.6,
     # Ollama
-    "OLLAMA_URL": "http://localhost:11434", "OLLAMA_MODEL": "",
-    "RAM_FOR_BIG": 24, "RAM_FOR_MID": 20, "NUM_CTX": 32768, "OLLAMA_RETRY_SECONDS": 15,
+    "OLLAMA_URL": "http://localhost:11434", "NUM_CTX": 32768, "OLLAMA_RETRY_SECONDS": 15,
     "TEMPERATURE": 0.2, "MAP_THRESHOLD_TOKENS": 6000, "CHUNK_TOKENS": 5000,
     "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
     # recording

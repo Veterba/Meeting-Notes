@@ -45,8 +45,7 @@ class Controller:
         self.watcher = None
         # What Ollama said, last time it was asked. Filled in off the main thread,
         # because asking it is a network call and no UI must wait for it.
-        self.net = {"ollama_up": False, "model": llm.default_model(),
-                    "model_ready": False, "models": [], "installed": []}
+        self.net = {"ollama_up": False, "model": llm.MODEL, "model_ready": False}
         self.on_change = None           # on_change()
         self.on_notice = None           # on_notice(title, message)
         self.on_offer = None            # on_offer(offer, app): "record" or "stop"
@@ -139,10 +138,7 @@ class Controller:
     def probe(self):
         """Ask Ollama what it is and what it has. Never on the main thread."""
         up = llm.ollama_up()
-        installed = llm.installed_models() if up else []
-        model = llm.default_model()
-        net = {"ollama_up": up, "model": model, "models": llm.model_choices(installed),
-               "installed": installed, "model_ready": llm.has_model(model, installed)}
+        net = {"ollama_up": up, "model": llm.MODEL, "model_ready": up and llm.has_model(llm.MODEL)}
         changed, self.net = net != self.net, net
         if changed:
             self._changed()
@@ -185,15 +181,13 @@ class Controller:
 
     # ------------------------------------------------------------ settings
 
-    def set_model(self, name: str):
-        """Use a model, downloading it first through the worker if it is missing."""
+    def download_model(self):
+        """Download the model through the worker, if it is missing."""
         if not self.net.get("ollama_up"):
-            raise ValueError("Ollama is not running, so no model can be chosen")
-        paths.save_setting("OLLAMA_MODEL", name)
-        if name not in (self.net.get("installed") or []):
-            pipeline.WORKER.submit(pipeline.Job(model=name))
-            self._notice("Downloading the model", f"{name} — several GB, this takes a while")
-        threading.Thread(target=self.probe, daemon=True).start()
+            raise ValueError("Ollama is not running, so the model cannot be downloaded")
+        if not self.net.get("model_ready"):
+            pipeline.WORKER.submit(pipeline.Job(model=llm.MODEL))
+            self._notice("Downloading the model", f"{llm.MODEL} — several GB, this takes a while")
         self._changed()
 
     def set_mail_mode(self, mode: str):

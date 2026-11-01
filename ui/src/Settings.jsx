@@ -11,6 +11,12 @@ export default function Settings({ state, refresh, say }) {
     refresh();
   }
 
+  async function downloadModel() {
+    const r = await api("/api/model/download", {});
+    if (r.error) say(r.error, "bad");
+    refresh();
+  }
+
   async function chooseFolder() {
     const r = await api("/api/folder", {});
     if (r.error) say(r.error, "bad");
@@ -35,19 +41,14 @@ export default function Settings({ state, refresh, say }) {
       </Group>
 
       <Group title="model" hint={state.ollama_up
-        ? "Runs locally through Ollama. One not downloaded yet is fetched when you pick it — several GB."
-        : "Ollama is not answering, so there is nothing to choose from."}>
-        {state.models.length > 0 && (
-          <div className="segments">
-            {state.models.map((name) => (
-              <button key={name} className={name === state.model ? "on" : ""}
-                      disabled={!state.ollama_up}
-                      onClick={() => name !== state.model && change({ model: name })}>
-                {name}{!state.installed.includes(name) && <span className="dim"> ↓</span>}
-              </button>
-            ))}
-          </div>
-        )}
+        ? "Writes the notes, locally through Ollama."
+        : "Ollama is not answering."}>
+        <div className="inline">
+          <code className="path">{state.model}</code>
+          {state.model_ready
+            ? <span className="ok">downloaded</span>
+            : state.ollama_up && <button onClick={downloadModel}>download · several GB</button>}
+        </div>
       </Group>
 
       <Group title="mail" hint="Outlook drafts wait in Outlook for you to send. SMTP sends straight away from the account below.">

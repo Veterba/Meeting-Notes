@@ -32,7 +32,8 @@ const WORDS = { found: "queued", processing: "summarising", ready: "to send", se
                 archived: "deleted" };
 const MARKS = { ...MARK, recorded: "◌", transcribing: "…", archived: "⌫" };
 
-export default function Meetings({ state, selected, onSelect, refresh, say }) {
+// `archive`: the same list and detail, for what was deleted.
+export default function Meetings({ state, archive, selected, onSelect, refresh, say }) {
   const [filter, setFilter] = useState("all");
   const [query, setQuery] = useState("");
   const [menu, setMenu] = useState(null);       // {item, x, y}
@@ -43,23 +44,21 @@ export default function Meetings({ state, selected, onSelect, refresh, say }) {
     setMenu({ item, x: e.clientX, y: e.clientY });
   }
 
-  const all = useMemo(() => items(state), [state]);
+  const all = useMemo(() => (archive ? archived(state) : items(state)), [state, archive]);
   const shown = useMemo(() => {
-    const pool = filter === "archive" ? archived(state) : all;
-    // The archive is not one of the filters: it is a different list altogether.
-    const test = filter === "archive" ? () => true : FILTERS.find(([name]) => name === filter)[1];
+    const test = archive ? () => true : FILTERS.find(([name]) => name === filter)[1];
     const q = query.trim().toLowerCase();
-    return pool.filter((i) => test(i) && (!q || i.title.toLowerCase().includes(q)));
-  }, [all, state, filter, query]);
+    return all.filter((i) => test(i) && (!q || i.title.toLowerCase().includes(q)));
+  }, [all, archive, filter, query]);
 
   // Nothing chosen yet: the newest meeting waiting to be sent, else the newest.
   useEffect(() => {
-    if (!selected && all.length) {
+    if (!archive && !selected && all.length) {
       onSelect((all.find((i) => i.status === "ready") || all[0]).key);
     }
-  }, [selected, all, onSelect]);
+  }, [archive, selected, all, onSelect]);
 
-  const item = [...all, ...archived(state)].find((i) => i.key === selected);
+  const item = all.find((i) => i.key === selected);
 
   return (
     <div className="split">
@@ -68,8 +67,8 @@ export default function Meetings({ state, selected, onSelect, refresh, say }) {
           <input className="search" placeholder="search" value={query}
                  onChange={(e) => setQuery(e.target.value)} />
           <div className="filters">
-            {filter === "archive" && <span className="archive-title">archive · deleted for good after {state.archive_days} days</span>}
-            {filter !== "archive" && FILTERS.map(([name]) => (
+            {archive && <span className="archive-title">deleted for good after {state.archive_days} days</span>}
+            {!archive && FILTERS.map(([name]) => (
               <button key={name} className={filter === name ? "on" : ""}
                       onClick={() => setFilter(name)}>{name}</button>
             ))}
@@ -89,14 +88,11 @@ export default function Meetings({ state, selected, onSelect, refresh, say }) {
           ))}
           {!shown.length && (
             <li className="empty">
-              {filter === "archive" ? "the archive is empty" : all.length ? "nothing matches" : "nothing yet"}
+              {archive ? (all.length ? "nothing matches" : "nothing deleted")
+                : all.length ? "nothing matches" : "nothing yet"}
             </li>
           )}
         </ul>
-        <button className={`archive-toggle ${filter === "archive" ? "on" : ""}`}
-                onClick={() => setFilter(filter === "archive" ? "all" : "archive")}>
-          {filter === "archive" ? "← back to meetings" : `⌫ archive · ${state.archive.length}`}
-        </button>
       </section>
 
       <section className="detail">
@@ -114,7 +110,8 @@ export default function Meetings({ state, selected, onSelect, refresh, say }) {
         {!item && (
           <div className="nothing">
             <pre>{CLOUD}</pre>
-            {all.length ? "pick a meeting"
+            {archive ? (all.length ? "pick something to restore" : "nothing deleted")
+              : all.length ? "pick a meeting"
               : <span>no meetings yet<br />record a call, process a file,<br />or drop a Teams transcript into the watched folder</span>}
           </div>
         )}
