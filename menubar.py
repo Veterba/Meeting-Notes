@@ -90,6 +90,7 @@ class TranscriptApp(rumps.App):
     def __init__(self):
         super().__init__("Meeting Notes", icon=str(ICON), template=True, quit_button=None)
         self.status_items = []
+        self.record_item = None
         self.app = Controller()
         self.app.on_change = lambda: on_main(self.changed)
         self.app.on_notice = lambda title, message: on_main(notify, title, message)
@@ -115,11 +116,14 @@ class TranscriptApp(rumps.App):
     def rebuild(self):
         """Draw the whole dropdown from menu.tree(). Main thread only."""
         self.status_items = []
+        self.record_item = None
         items = []
         for item in menu.tree(self.app.facts()):
             drawn = self.draw(item)
             if item.role == "status":
                 self.status_items.append(drawn)
+            if item.action == "toggle_recording":
+                self.record_item = drawn
             items.append(drawn)
         self.menu.clear()
         self.menu = items
@@ -139,11 +143,15 @@ class TranscriptApp(rumps.App):
             drawn.add(self.draw(child))
         return drawn
 
-    @rumps.timer(2)
+    @rumps.timer(1)
     def tick(self, _):
-        """Keep the status lines current while a job runs. No network, no sqlite."""
-        for line, item in zip(menu.status_lines(self.app.status_facts()), self.status_items):
+        """Keep the status lines and the recording clock current. No network, no
+        sqlite: cheap enough every second."""
+        facts = self.app.status_facts()
+        for line, item in zip(menu.status_lines(facts), self.status_items):
             item.title = line
+        if self.record_item:                # the running clock while recording
+            self.record_item.title = menu.record_item(facts["recording"]).title
 
     @rumps.timer(20)
     def probe_timer(self, _):
@@ -171,6 +179,12 @@ class TranscriptApp(rumps.App):
         self.rebuild()
 
     # ------------------------------------------------------------ actions
+
+    def toggle_recording(self, sender, _arg=None):
+        try:
+            self.app.set_recording(not self.app.recorder.recording)
+        except RuntimeError as e:
+            notify("Cannot record", str(e))
 
     def open_window(self, sender, _arg=None):
         self.window.show()

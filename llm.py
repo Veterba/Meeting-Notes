@@ -218,6 +218,12 @@ def _extract_json(text: str):
     raise ValueError("unterminated JSON in the model response")
 
 
+def with_schema(prompt: str, schema: dict) -> str:
+    """The prompt, for a model that cannot be held to a schema: told it instead."""
+    return (prompt + "\n\nAnswer with ONLY one JSON object, no prose and no code fence, "
+            "matching this JSON schema:\n" + json.dumps(schema, ensure_ascii=False))
+
+
 def generate_json(prompt: str, schema: dict, model: str) -> dict:
     """One /api/generate call constrained by a JSON schema, with a single retry.
 
@@ -242,6 +248,14 @@ def generate_json(prompt: str, schema: dict, model: str) -> dict:
         r = requests.post(endpoint, json=payload, timeout=limit)
         if r.status_code == 400 and "think" in r.text.lower():
             payload.pop("think", None)   # model has no thinking mode
+            r = requests.post(endpoint, json=payload, timeout=limit)
+        if r.status_code == 501 and "structured output" in r.text.lower():
+            # Some model and Ollama builds (qwen3.5 on Ollama 0.40) cannot be
+            # constrained by a schema at all. The schema goes into the prompt
+            # instead, and _extract_json reads what comes back.
+            payload.pop("format", None)
+            prompt = with_schema(prompt, schema)
+            payload["prompt"] = prompt + "\n/no_think"
             r = requests.post(endpoint, json=payload, timeout=limit)
         r.raise_for_status()
         raw = r.json().get("response", "")

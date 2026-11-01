@@ -61,6 +61,15 @@ export default function Settings({ state, refresh, say }) {
       </Group>
 
       <Recipients state={state} change={change} />
+
+      <Group title="archive" hint="A deleted meeting — its notes and its recording — waits in the archive this long, then goes for good. Until then it can be restored.">
+        <div className="segments">
+          {[[7, "a week"], [30, "a month"], [90, "3 months"]].map(([n, label]) => (
+            <button key={n} className={state.archive_days === n ? "on" : ""}
+                    onClick={() => change({ archive_days: n })}>{label}</button>
+          ))}
+        </div>
+      </Group>
     </div>
   );
 }

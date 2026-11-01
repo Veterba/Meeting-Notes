@@ -192,6 +192,50 @@ pane of glass;
 The page source is in `ui/src`; `cd ui && npm run build` rebuilds it, and
 `build.sh` / `run.sh` do that for you.
 
+## Recording a call
+
+*Record the call* (menu or window) records both sides of any call — Teams, Zoom, a
+browser — with no bot joining it. A small Swift helper inside the app reads the
+Mac's own sound through a Core Audio process tap (macOS 14.2+) and the microphone,
+into `recordings/<date time>/` in the data folder: `system.wav` (the others),
+`mic.wav` (you) and `meta.json` (formats and start time). The window shows a clock
+and a level meter for each, so a silent stream shows up during the call.
+
+The first recording asks for two permissions, *Microphone* and *System Audio
+Recording*. With an ad-hoc signed build, macOS may ask again after a rebuild.
+
+**Live transcript.** While the call runs, the window's live view shows what each
+side said, a few seconds behind. The app reads both files as they grow, cuts
+them at the pauses and sends each piece to a local whisper.cpp server
+(`brew install whisper-cpp`); the model, large-v3-turbo (~570 MB), is downloaded
+into `models/` in the data folder the first time. Without headphones the
+others' voices leak from the speakers into your microphone; a line of yours that
+repeats theirs from the same moment is dropped as that echo. (Apple's own voice
+processing is not used: it starved the system audio tap.) Headphones still give
+the cleanest result.
+
+**After the call** the lines are saved as `Call <date time>.vtt` in the
+recording's folder and summarised like any downloaded transcript, so the call
+lands in the meetings list (tagged *rec*) with its notes. Every meeting has a
+*notes / transcript* switch to read what was actually said.
+
+`WHISPER_LANGUAGE` (default `auto`) can be fixed to `ru` or `en`, which is more
+reliable on short phrases.
+
+**Transcribe again** runs the speech model over a call's whole recording, for
+when the live transcript missed things; the meeting is then summarised again. A
+recording in which nothing was recognised still shows in the list, so it can be
+transcribed again or deleted.
+
+## Deleting
+
+*Delete* on a meeting moves its notes — and, for a recorded call, the whole
+recording — into `archive/` in the data folder. The *archive* at the bottom of
+the list shows what is there and restores it. After a week, a month or three
+months (Settings ▸ archive, `ARCHIVE_DAYS`) it is removed for good. A downloaded
+transcript is never moved or deleted; the history remembers it as deleted, so
+the watcher does not summarise it again.
+
 ## The menu bar widget
 
 The dropdown is the quick view of the same app:

@@ -1,6 +1,7 @@
 """The dropdown, as data. Clicking cannot be tested headless; this is everything
 that can be: the titles, the marks, the ticks and the order.
 """
+import time
 from pathlib import Path
 
 import history
@@ -71,7 +72,8 @@ def test_the_dropdown_is_in_the_agreed_order():
     assert titles(menu.tree(FACTS)) == [
         "● Ollama: running", "Model: qwen3.5:9b", "Watching: ~/Downloads", "Now: Idle",
         "-",
-        "Open Meeting Notes", "Recent meetings", "Process a file…", "Watch the folder",
+        "Open Meeting Notes", "● Record the call", "Recent meetings", "Process a file…",
+        "Watch the folder",
         "-",
         "Settings",
         "-",
@@ -85,6 +87,14 @@ def test_only_the_top_four_lines_are_status_lines():
     assert all(i.role != "status" for i in tree[4:])
     # A status line has no action, which is what greys it out.
     assert all(i.action is None for i in tree[:4])
+
+
+def test_the_record_item_shows_the_clock_while_recording():
+    assert menu.record_item({}).title == "● Record the call"
+    item = menu.record_item({"recording": True, "seconds": 125.7})
+    assert (item.title, item.action) == ("■ Stop recording  02:05", "toggle_recording")
+    started = time.time() - 61.2              # the clock runs from the start, not the meters
+    assert menu.record_item({"recording": True, "started_at": started}).title.endswith("01:01")
 
 
 def test_watch_the_folder_is_ticked_when_it_is_on():

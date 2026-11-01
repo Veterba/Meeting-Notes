@@ -51,6 +51,10 @@ DEFAULTS = {
     "RAM_FOR_BIG": 24, "RAM_FOR_MID": 20, "NUM_CTX": 32768, "OLLAMA_RETRY_SECONDS": 15,
     "TEMPERATURE": 0.2, "MAP_THRESHOLD_TOKENS": 6000, "CHUNK_TOKENS": 5000,
     "OVERLAP_TURNS": 2, "REQUEST_TIMEOUT": 1800,
+    # recording
+    "WHISPER_MODEL": "", "WHISPER_LANGUAGE": "auto",
+    # deleted meetings stay in the archive this many days: 7, 30 or 90
+    "ARCHIVE_DAYS": 30,
     # mail
     "MAIL_MODE": "outlook_draft", "RECIPIENTS": "", "SMTP_USER": "",
     "SMTP_HOST": "", "SMTP_PORT": 465, "SMTP_FROM": "",
@@ -135,6 +139,18 @@ def logs() -> Path:
 
 def history_db() -> Path:
     return _dir(DATA) / "history.db"
+
+
+def recordings() -> Path:
+    return _dir(DATA / "recordings")
+
+
+def recorder_binary() -> Path:
+    """The Swift helper that records a call. Inside the bundle it sits next to
+    the app's own executable; from source, build.sh / run.sh compile it into build/."""
+    if BUNDLED:
+        return Path(sys.executable).resolve().parent / "mn-recorder"
+    return CODE / "build" / "mn-recorder"
 
 
 # ---------------------------------------------------------------- first start

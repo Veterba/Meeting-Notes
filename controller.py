@@ -7,14 +7,18 @@ inside them, the window simply polls.
 """
 import subprocess
 import threading
+import time
 from pathlib import Path
 
+import archive
 import history
 import llm
 import mailer
 import paths
 import pipeline
 from menu import MAIL_MODES
+from recorder import Recorder
+from transcriber import Live
 from watcher import Watcher
 
 log = pipeline.log
@@ -43,6 +47,9 @@ class Controller:
                     "model_ready": False, "models": [], "installed": []}
         self.on_change = None           # on_change()
         self.on_notice = None           # on_notice(title, message)
+        self.recorder = Recorder()
+        self.recorder.on_event = self._recording_event
+        self.retranscribing = {}        # recording name -> what it is doing
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ facts
@@ -54,11 +61,26 @@ class Controller:
     def status_facts(self) -> dict:
         """Cheap enough to ask every two seconds: no network, no sqlite."""
         return {**self.net, "watching": self.watching, "folder": paths.inbox(),
-                "job": pipeline.WORKER.snapshot()}
+                "job": pipeline.WORKER.snapshot(), "recording": self.recorder.snapshot()}
 
     def facts(self, meetings: int = 7) -> dict:
         return {**self.status_facts(), "mail_mode": mailer.mail_mode(),
                 "meetings": history.listing(meetings)}
+
+    def lone_recordings(self) -> list:
+        """Recordings that never became a meeting: nothing was recognised in
+        them, or they are still being transcribed. Newest first."""
+        known = {archive.recording_of(s) for s in history.sources()}
+        current = self.recorder.snapshot()["folder"]
+        lone = []
+        for folder in sorted(paths.recordings().iterdir(), reverse=True):
+            if (not folder.is_dir() or folder in known or str(folder) == current
+                    or not archive.RE_RECORDING.match(folder.name)):
+                continue
+            lone.append({"name": folder.name, "title": f"Call {folder.name}",
+                         "date": folder.name[:10],
+                         "status": self.retranscribing.get(folder.name, "")})
+        return lone
 
     def _changed(self):
         self._call(self.on_change)
@@ -79,6 +101,19 @@ class Controller:
     def start(self):
         self.apply_watch_state()
         threading.Thread(target=self._startup_checks, daemon=True).start()
+        threading.Thread(target=self._purge_loop, daemon=True).start()
+
+    def _purge_loop(self):
+        """Empty what is due from the archive at start-up, then every six hours."""
+        while True:
+            try:
+                gone = archive.purge()
+                if gone:
+                    log.info("Removed %d item(s) from the archive for good", gone)
+                    self._changed()
+            except Exception as e:
+                log.error("Could not empty the archive: %s", e)
+            time.sleep(6 * 3600)
 
     def _startup_checks(self):
         """The slow work: what was left unfinished, the Keychain and Ollama."""
@@ -103,6 +138,7 @@ class Controller:
             self._changed()
 
     def stop(self):
+        self.recorder.stop()
         with self._lock:
             if self.watcher:
                 self.watcher.stop()
@@ -160,12 +196,42 @@ class Controller:
         paths.save_setting("RECIPIENTS", ", ".join(entries))
         self._changed()
 
+    def set_archive_days(self, value):
+        if int(value) not in archive.CHOICES:
+            raise ValueError(f"keep the archive {', '.join(map(str, archive.CHOICES))} days")
+        paths.save_setting("ARCHIVE_DAYS", str(int(value)))
+        self._changed()
+
     def save_account(self, address: str, secret: str) -> str:
         """Save the mail account. Returns what is wrong with it, or ""."""
         problem = mailer.save_account(address, secret)
         if not problem:
             self._changed()
         return problem
+
+    # ------------------------------------------------------------ recording
+
+    def set_recording(self, on: bool):
+        """Start or stop recording the call. Raises RuntimeError when it cannot start."""
+        if on and not self.recorder.recording:
+            self.recorder.start()
+        elif not on:
+            self.recorder.stop()
+        self._changed()
+
+    def _recording_event(self, kind, folder, message):
+        if kind == "error":
+            self._notice("Recording failed", message)
+        elif kind == "warning":
+            self._notice("Recording problem", message)
+        elif kind == "transcribed" and message:
+            # The call is a transcript now, and goes the way every transcript goes.
+            decision = pipeline.submit(message)
+            self._notice("Call transcribed", "Writing the notes now" if decision.queued
+                         else decision.error or decision.note)
+        elif kind == "transcribed":
+            self._notice("Recording saved", "Nothing was said, so there is nothing to summarise")
+        self._changed()
 
     # ------------------------------------------------------------ meetings
 
@@ -180,6 +246,63 @@ class Controller:
         decision = pipeline.retry(meeting)
         self._changed()
         return decision
+
+    # ------------------------------------------------------------ deleting
+
+    def archive_meeting(self, meeting: str):
+        archive.archive_meeting(meeting)
+        self._changed()
+
+    def archive_recording(self, name: str):
+        if self.recorder.snapshot()["folder"].endswith(name) or name in self.retranscribing:
+            raise RuntimeError("that recording is in use")
+        archive.archive_recording(name)
+        self._changed()
+
+    def restore(self, entry_id: str):
+        archive.restore(entry_id)
+        self._changed()
+
+    # ------------------------------------------------------------ transcribing again
+
+    def retranscribe(self, name: str):
+        """Run Whisper over a whole recording again, in the background, and
+        summarise what comes out. For a call whose live transcript went wrong."""
+        folder = archive.recording(name)
+        if self.recorder.recording or self.retranscribing:
+            raise RuntimeError("one transcription at a time — finish the recording first")
+        self.retranscribing[name] = "transcribing"
+        threading.Thread(target=self._retranscribe, args=(folder,), daemon=True).start()
+        self._changed()
+
+    def _retranscribe(self, folder):
+        old = self._meetings_in(folder)
+        try:
+            transcript = Live(folder).finish_all()
+            if not transcript:
+                self._notice("Nothing recognised", f"No speech was found in Call {folder.name}")
+                return
+            decision = pipeline.submit(transcript, force=True)
+            # The old transcript's meeting gives way to the new one.
+            for h in old:
+                if h != decision.meeting:
+                    row = history.find(h)
+                    if row and row["notes"] and Path(row["notes"]).exists():
+                        Path(row["notes"]).unlink()
+                    history.set_status(h, "archived")
+            self._notice("Transcribed again", "Writing the notes now" if decision.queued
+                         else decision.error or decision.note)
+        except Exception as e:
+            log.error("Transcribing %s again failed: %s", folder.name, e)
+            self._notice("Could not transcribe", str(e))
+        finally:
+            self.retranscribing.pop(folder.name, None)
+            self._changed()
+
+    @staticmethod
+    def _meetings_in(folder) -> list:
+        return [r["hash"] for r in history.recent(10000)
+                if archive.recording_of(r["source"]) == folder]
 
     def reveal(self, meeting: str) -> str:
         """Show the transcript in Finder. Returns why it could not, or ""."""

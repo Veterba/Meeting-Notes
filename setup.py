@@ -23,7 +23,7 @@ OPTIONS = {
         "CFBundleDisplayName": "Meeting Notes",
         "CFBundleIdentifier": "local.meetingnotes.app",
         # The version of the commit it was built from: v0.MINOR.PATCH.
-        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleShortVersionString": "0.6.0",
         "CFBundleVersion": "0.5.0",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
@@ -31,10 +31,15 @@ OPTIONS = {
         "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
         "NSAppleEventsUsageDescription":
             "Meeting Notes creates the email draft in Outlook for you.",
+        # Recording a call: the microphone is me, the system audio is everyone else.
+        "NSMicrophoneUsageDescription":
+            "Meeting Notes records your side of a call, to transcribe it on this Mac.",
+        "NSAudioCaptureUsageDescription":
+            "Meeting Notes records the other side of a call, to transcribe it on this Mac.",
     },
     # Traced automatically, but these are imported lazily or by name.
     "includes": ["paths", "parser", "llm", "mailer", "main", "pipeline", "watcher",
-                 "controller",
+                 "controller", "recorder", "transcriber", "archive",
                  "server", "window", "history", "menu",
                  "WebKit", "AppKit", "Foundation", "objc", "PyObjCTools.AppHelper",
                  # jaraco is a namespace package, so py2app cannot take it whole.

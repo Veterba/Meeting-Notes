@@ -217,3 +217,44 @@ def test_the_mail_account_is_saved_and_tested_without_a_password_coming_back(
                ) == (200, {"ok": True, "message": "Sent."})
     assert saved == [("me@gmail.com", "pw")] and tested == [("me@gmail.com", None)]
     assert "pw" not in json.dumps(api("GET", "/api/state")[1])
+
+
+# ---------------------------------------------------------------- transcripts and recording
+
+def test_a_meetings_transcript_is_read_again_from_its_source(api, meeting):
+    status, r = api("GET", f"/api/meeting/{meeting}/transcript")
+    assert status == 200 and r["error"] == "" and not r["recorded"]
+    assert r["turns"] and set(r["turns"][0]) == {"speaker", "text"}
+    assert api("GET", "/api/meeting/" + "0" * 64 + "/transcript")[1]["error"] == "no such meeting"
+
+
+def test_the_live_lines_come_from_the_call_being_recorded(api, app, tmp_path):
+    assert api("GET", "/api/live")[1]["lines"] == []
+
+    from transcriber import Line, Live
+    live = app.recorder.live = Live(tmp_path, transcribe=lambda s: "")
+    live._add(Line("them", 1, 2, "hello"))
+    live._add(Line("me", 3, 4, "hi"))
+
+    status, r = api("GET", "/api/live")
+    assert status == 200 and r["count"] == 2
+    assert [line["text"] for line in r["lines"]] == ["hello", "hi"]
+    # Nothing new: no lines sent again.
+    assert api("GET", f"/api/live?version={r['version']}")[1]["lines"] is None
+
+
+def test_deleting_and_restoring_through_the_window(api, meeting):
+    from urllib.parse import quote
+    assert api("POST", f"/api/meeting/{meeting}/archive", {}) == (200, {"ok": True})
+    state = api("GET", "/api/state")[1]
+    assert state["meetings"] == [] and len(state["archive"]) == 1
+    entry = state["archive"][0]["id"]
+
+    assert api("POST", f"/api/archive/{quote(entry)}/restore", {}) == (200, {"ok": True})
+    assert [m["hash"] for m in api("GET", "/api/state")[1]["meetings"]] == [meeting]
+
+    for bad in ("..%2F..%2Fetc", quote("2026-11-01 10-00-00 zzzzzz")):
+        assert api("POST", f"/api/archive/{bad}/restore", {})[0] == 404
+    assert api("POST", "/api/recording/..%2Fhistory.db/archive", {})[0] == 404
+    # Only a recorded call has audio to transcribe again.
+    assert api("POST", f"/api/meeting/{meeting}/transcribe", {})[1]["ok"] is False

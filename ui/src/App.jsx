@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, bar, jobLine, shortPath } from "./api.js";
+import Live, { clock, useElapsed } from "./Live.jsx";
 import Meetings from "./Meetings.jsx";
 import Settings from "./Settings.jsx";
 import Sky from "./Sky.jsx";
@@ -20,6 +21,14 @@ export default function App() {
       /* the app is quitting, or restarting the server; the next poll will tell */
     }
   }, []);
+
+  // Pressing record — here or in the menu bar — brings up the live view.
+  const wasRecording = useRef(false);
+  useEffect(() => {
+    const now = !!state?.recording?.recording;
+    if (now && !wasRecording.current) setView("live");
+    wasRecording.current = now;
+  }, [state?.recording?.recording]);
 
   useEffect(() => {
     refresh();
@@ -62,6 +71,11 @@ export default function App() {
               <pre className="brand">{"▞▚ meeting\n▚▞ notes"}</pre>
 
               <nav>
+                {(state.recording.recording || state.recording.transcribing || view === "live") && (
+                  <button className={`live-nav ${view === "live" ? "on" : ""}`} onClick={() => setView("live")}>
+                    {state.recording.recording ? "● live" : "last call"}
+                  </button>
+                )}
                 <button className={view === "meetings" ? "on" : ""} onClick={() => setView("meetings")}>
                   meetings<span className="count">{state.meetings.length || ""}</span>
                 </button>
@@ -71,21 +85,44 @@ export default function App() {
               </nav>
 
               <button className="primary" onClick={pickFile}>process a file…</button>
+              <Record recording={state.recording} refresh={refresh} say={say}
+                      onStart={() => setView("live")} />
 
               <Status state={state} />
             </aside>
 
             <main className="card">
-              {view === "meetings"
-                ? <Meetings state={state} selected={selected} onSelect={setSelected}
-                            refresh={refresh} say={say} />
-                : <Settings state={state} refresh={refresh} say={say} />}
+              {view === "meetings" && <Meetings state={state} selected={selected} onSelect={setSelected}
+                                                refresh={refresh} say={say} />}
+              {view === "live" && <Live recording={state.recording} refresh={refresh} say={say} />}
+              {view === "settings" && <Settings state={state} refresh={refresh} say={say} />}
             </main>
           </div>
         </div>
       )}
       {notice && <Toast key={notice.at} notice={notice} onDone={() => setNotice(null)} />}
     </>
+  );
+}
+
+// The call recorder's button. The clock and the meters live in the live view.
+function Record({ recording, refresh, say, onStart }) {
+  const seconds = useElapsed(recording);
+  async function toggle() {
+    const starting = !recording.recording;
+    const r = await api("/api/record", { on: starting });
+    if (r.error) say(r.error, "bad");
+    else if (starting) onStart();
+    refresh();
+  }
+  return (
+    <div className={`record ${recording.recording ? "on" : ""}`}>
+      <button onClick={toggle}>
+        {recording.recording
+          ? <>■ stop <span className="clock">{clock(seconds)}</span></>
+          : "● record the call"}
+      </button>
+    </div>
   );
 }
 

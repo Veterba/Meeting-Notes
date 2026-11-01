@@ -44,6 +44,14 @@ Files:
 - `pipeline.py` — `read()`/`Transcript`, `register()`/`Decision`, `process()`, the `Worker`
   (the only thing that runs the model, one job at a time), `resume()`.
 - `watcher.py` — `Watcher` (only detects stable files). `main.py` — `init()` and the CLI.
+- `recorder/main.swift` — `mn-recorder`, the Swift helper: Core Audio process tap (system
+  audio) + microphone → `system.wav` / `mic.wav`; JSON lines on stdout. `recorder.py` —
+  `Recorder`, starts and stops it. Recordings live in `DATA/recordings/`.
+- `transcriber.py` — `Live`: reads the growing WAVs, cuts utterances at pauses, transcribes
+  them with a local whisper.cpp server (`WhisperServer`), drops echo, writes the call's `.vtt`,
+  which `pipeline.submit` then summarises.
+- `archive.py` — delete = move a meeting's notes and recording folder into `DATA/archive/`
+  with a manifest; restore; purge after `ARCHIVE_DAYS`. The history row stays as `archived`.
 - `parser.py` — `.vtt` / `.docx` → turns; `looks_like_transcript()`.
 - `history.py` — sqlite `history.db`: fingerprint, source, status (found → processing → ready →
   sent, or failed / skipped), notes path, recipients.
@@ -71,9 +79,10 @@ Where things stand:
   /Users/vellow13/Documents/Recto Vault/Programming/Projects/Trasncript.md
 - The parser handles old Teams, current Teams `.docx` and speakerless exports (v0.4.0),
   tested on synthetic samples only so far.
-- Planned main feature: recording a call (microphone + system audio through a Core Audio tap),
-  transcribing it locally, and feeding the turns into the same pipeline. Next after the
-  window; not started yet.
+- Recording a call (v0.6.0): both streams → live transcript (whisper.cpp) → `.vtt` → the same
+  pipeline. Next: diarization of "Them" into speakers, better echo handling. Never record in
+  a test or a check: tests use a fake helper and a fake transcriber; a real recording is the
+  user's click. Whisper models are large: download them only when the task needs it.
 
 Checks before saying something is done:
 - `.venv/bin/python -m pytest -q`

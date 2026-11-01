@@ -37,6 +37,15 @@ if [ ! -f ui/dist/index.html ] || [ -n "$(find ui/src ui/index.html ui/package.j
   npm run build --prefix ui >/dev/null
 fi
 
+# --- the recorder -------------------------------------------------------
+if [ ! -x build/mn-recorder ] || [ recorder/main.swift -nt build/mn-recorder ]; then
+  command -v swiftc >/dev/null || die "swiftc not found. Install the tools: xcode-select --install"
+  say "Building the recorder"
+  mkdir -p build
+  swiftc -O -o build/mn-recorder recorder/main.swift -framework CoreAudio -framework AVFoundation 2>/dev/null \
+    || die "The recorder did not compile: swiftc -O -o build/mn-recorder recorder/main.swift"
+fi
+
 # Settings, notes and logs live in the data folder, not here — the first start
 # creates it from .env.example, or from this folder's .env if there is one.
 # MEETING_NOTES_DATA overrides it, for a dev run that must not touch the real one.

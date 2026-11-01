@@ -26,6 +26,7 @@ import paths
 #   sent       the email went out (or the draft was created)
 #   failed     something broke; the error text is in the row
 #   skipped    parsed, but not a meeting transcript — left alone on purpose
+#   archived   deleted by the user; kept so the same transcript is not taken again
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meetings (
@@ -132,6 +133,12 @@ def listing(limit: int = 25) -> list:
     return items
 
 
+def sources() -> list:
+    """Every transcript the history knows, archived ones included."""
+    with _db() as conn:
+        return [r["source"] for r in conn.execute("SELECT source FROM meetings")]
+
+
 def unfinished() -> list:
     """Meetings found or being processed: what a quit or a crash left half done."""
     with _db() as conn:
@@ -141,10 +148,10 @@ def unfinished() -> list:
 
 
 def recent(limit: int = 25) -> list:
-    """Meetings, newest first. Skipped files are left out — they are not meetings,
-    they only sit in the table so the watcher stops reconsidering them."""
+    """Meetings, newest first. Skipped and archived ones are left out — they only
+    sit in the table so the watcher stops reconsidering them."""
     with _db() as conn:
         rows = conn.execute(
-            "SELECT * FROM meetings WHERE status != 'skipped' "
+            "SELECT * FROM meetings WHERE status NOT IN ('skipped', 'archived') "
             "ORDER BY found_at DESC, rowid DESC LIMIT ?", (limit,)).fetchall()
     return [dict(r) for r in rows]

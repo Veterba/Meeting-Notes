@@ -18,11 +18,13 @@ import secrets
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
+import archive
 import controller
 import history
 import mailer
+import parser as tparser
 import paths
 
 # The React build (ui/ is its source; npm run build writes ui/dist).
@@ -31,12 +33,19 @@ UI_DIR = paths.CODE / "ui" / "dist"
 TOKEN = secrets.token_urlsafe(24)
 
 # /api/meeting/<hash>, and what can be done to it
-RE_MEETING = re.compile(r"^/api/meeting/([0-9a-f]{64})(?:/(send|retry|reveal))?$")
+RE_MEETING = re.compile(
+    r"^/api/meeting/([0-9a-f]{64})(?:/(send|retry|reveal|transcript|archive|transcribe))?$")
+# /api/recording/<folder name>/... and /api/archive/<entry id>/restore, names URL-encoded
+RE_RECORDING = re.compile(r"^/api/recording/([^/]+)/(archive|transcribe)$")
+RE_RESTORE = re.compile(r"^/api/archive/([^/]+)/restore$")
 
 
 def state(app: controller.Controller) -> dict:
     """Everything the window shows, in one poll."""
     facts = app.facts(meetings=200)
+    recordings = paths.recordings()
+    for m in facts["meetings"]:
+        m["recorded"] = Path(m["source"]).is_relative_to(recordings)
     return {
         **{k: facts[k] for k in ("ollama_up", "model", "model_ready", "models",
                                  "installed", "watching", "mail_mode", "meetings")},
@@ -45,6 +54,10 @@ def state(app: controller.Controller) -> dict:
         "job": facts["job"],
         "recipients": mailer.split_addresses(paths.setting("RECIPIENTS")),
         "account": mailer.account(),
+        "recording": facts["recording"],
+        "recordings": app.lone_recordings(),
+        "archive": archive.entries(),
+        "archive_days": archive.days(),
     }
 
 
@@ -52,6 +65,23 @@ def notes_file(meeting: str) -> Path:
     """Where a meeting's notes are, or None if it has none."""
     row = history.find(meeting)
     return Path(row["notes"]) if row and row["notes"] else None
+
+
+def transcript(meeting: str) -> dict:
+    """What was said in a meeting, read again from its source: the downloaded
+    file, or the recording's own transcript."""
+    row = history.find(meeting)
+    if not row:
+        return {"error": "no such meeting", "turns": []}
+    src = Path(row["source"])
+    try:
+        turns = tparser.parse(src).turns
+    except Exception as e:
+        return {"error": f"the transcript cannot be read: {e}" if src.exists()
+                else f"the transcript is no longer at {src}", "turns": []}
+    return {"error": "", "source": src.name,
+            "recorded": src.is_relative_to(paths.recordings()),
+            "turns": [{"speaker": s, "text": t} for s, t in turns]}
 
 
 def decision(d) -> dict:
@@ -119,7 +149,11 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/api/state":
             return self._json(state(self.app))
+        if path == "/api/live":
+            return self._json(self._live(parse_qs(urlparse(self.path).query)))
         m = RE_MEETING.match(path)
+        if m and m.group(2) == "transcript":
+            return self._json(transcript(m.group(1)))
         if m and not m.group(2):
             notes = notes_file(m.group(1))
             if not (notes and notes.exists()):
@@ -139,8 +173,12 @@ class Handler(BaseHTTPRequestHandler):
         m = RE_MEETING.match(path)
         if m:
             return self._meeting(m.group(1), m.group(2), body)
+        m = RE_RECORDING.match(path) or RE_RESTORE.match(path)
+        if m:
+            return self._library(m, unquote(m.group(1)))
         route = {"/api/pick": self._pick, "/api/folder": self._folder,
                  "/api/settings": self._settings, "/api/account": self._account,
+                 "/api/record": self._record,
                  "/api/account/test": self._account_test}.get(path)
         if not route:
             return self._json({"error": "not found"}, 404)
@@ -148,8 +186,48 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(route(body))
         except (KeyError, ValueError) as e:
             return self._json({"error": f"bad request: {e}"}, 400)
+        except RuntimeError as e:
+            return self._json({"ok": False, "error": str(e)})
+
+    def _live(self, query: dict) -> dict:
+        """The lines of the call being recorded (or the last one), unless the
+        page already has this `version` of them."""
+        live = self.app.recorder.live
+        if not live:
+            return {"status": "", "error": "", "count": 0, "version": 0, "lines": []}
+        return live.snapshot(int((query.get("version") or ["-1"])[0]))
+
+    def _library(self, m, name: str):
+        """Deleting, restoring and transcribing again: by a recording's folder
+        name or an archive entry's id, each checked against what exists."""
+        action = m.group(2) if m.re is RE_RECORDING else "restore"
+        work = {"archive": self.app.archive_recording, "transcribe": self.app.retranscribe,
+                "restore": self.app.restore}[action]
+        try:
+            work(name)
+        except KeyError as e:
+            return self._json({"ok": False, "error": str(e).strip("'")}, 404)
+        except (RuntimeError, OSError) as e:
+            return self._json({"ok": False, "error": str(e)})
+        return self._json({"ok": True})
 
     def _meeting(self, meeting: str, action: str, body: dict):
+        if action in ("archive", "transcribe"):
+            try:
+                if action == "archive":
+                    self.app.archive_meeting(meeting)
+                else:
+                    row = history.find(meeting)
+                    folder = row and archive.recording_of(row["source"])
+                    if not folder:
+                        return self._json({"ok": False, "error": "only a recorded call "
+                                           "can be transcribed again"})
+                    self.app.retranscribe(folder.name)
+            except KeyError as e:
+                return self._json({"ok": False, "error": str(e).strip("'")}, 404)
+            except (RuntimeError, OSError) as e:
+                return self._json({"ok": False, "error": str(e)})
+            return self._json({"ok": True})
         if action == "retry":
             return self._json(decision(self.app.retry(meeting)))
         if action == "reveal":
@@ -193,12 +271,17 @@ class Handler(BaseHTTPRequestHandler):
         setters = {"watching": lambda v: self.app.set_watching(bool(v)),
                    "model": self.app.set_model,
                    "mail_mode": self.app.set_mail_mode,
-                   "recipients": self.app.set_recipients}
+                   "recipients": self.app.set_recipients,
+                   "archive_days": self.app.set_archive_days}
         unknown = set(body) - set(setters)
         if unknown:
             raise KeyError(", ".join(sorted(unknown)))
         for key, value in body.items():
             setters[key](value)
+        return {"ok": True}
+
+    def _record(self, body):
+        self.app.set_recording(bool(body["on"]))
         return {"ok": True}
 
     def _account(self, body):

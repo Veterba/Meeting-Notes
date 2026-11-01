@@ -6,6 +6,29 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.6.0 — 2026-11-01
+### Added
+- Recording a call: *Record the call* in the menu and the window. A Swift helper
+  (`recorder/main.swift`, built into the app) records system audio through a Core Audio tap and
+  the microphone into `recordings/<date time>/`, and warns when a stream delivers nothing.
+- Live transcription: a local whisper.cpp server (`brew install whisper-cpp`, model downloaded on
+  first use) turns both sides into text during the call, shown in the window's live view. Lines
+  of mine that repeat theirs are dropped as echo.
+- After the call the transcript is saved as a `.vtt` and summarised like a downloaded one; every
+  meeting has a notes / transcript switch, and a recorded call can be transcribed again from its
+  whole recording. A recording with nothing recognised still shows in the list.
+- Delete: a meeting (notes and recording) moves to an archive, restorable, removed for good
+  after a week, a month or 3 months (`ARCHIVE_DAYS`, in settings).
+- The live view shows the sentence still being said, refreshed about every second, and replaces
+  it with the final line at the pause. A meeting's actions (show in Finder, transcribe again,
+  summarise again, delete) are in a menu: double-click or right-click it, or its ⋯.
+### Fixed
+- A model that cannot take a JSON schema (qwen3.5 on Ollama 0.40: "structured output is
+  unavailable") is given the schema in the prompt instead of failing.
+### Changed
+- `build.sh` and `run.sh` compile the recorder with `swiftc`; the app asks for microphone and
+  system audio permission the first time it records.
+
 ## v0.5.0 — 2026-10-31
 ### Added
 - A main window: meeting list with search and status filters, the notes editor, Reprocess and

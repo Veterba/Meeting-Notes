@@ -4,6 +4,7 @@ rumps is handed the result of `tree()` and nothing else. Keeping the titles, the
 marks and the order in a plain function is what makes the part that is easy to get
 wrong testable without a menu bar — see tests/test_menu.py.
 """
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -132,12 +133,23 @@ def settings_items(facts: dict) -> list:
     ]
 
 
+def record_item(recording: dict) -> Item:
+    """● Record, or ■ Stop recording with how long it has been going."""
+    if not recording.get("recording"):
+        return Item("● Record the call", action="toggle_recording")
+    started = recording.get("started_at")
+    seconds = int(time.time() - started if started else recording.get("seconds") or 0)
+    return Item(f"■ Stop recording  {seconds // 60:02d}:{seconds % 60:02d}",
+                action="toggle_recording")
+
+
 def tree(facts: dict) -> list:
     """The whole dropdown, top to bottom."""
     items = [Item(line, role="status") for line in status_lines(facts)]
     items += [
         SEPARATOR,
         Item("Open Meeting Notes", action="open_window", key="o"),
+        record_item(facts.get("recording") or {}),
         Item("Recent meetings", children=tuple(meeting_items(facts.get("meetings")))),
         Item("Process a file…", action="pick_file"),
         Item("Watch the folder", action="toggle_watching",
