@@ -258,3 +258,16 @@ def test_deleting_and_restoring_through_the_window(api, meeting):
     assert api("POST", "/api/recording/..%2Fhistory.db/archive", {})[0] == 404
     # Only a recorded call has audio to transcribe again.
     assert api("POST", f"/api/meeting/{meeting}/transcribe", {})[1]["ok"] is False
+
+
+def test_a_voice_is_named_in_the_notes_and_the_transcript(api, meeting):
+    turns = api("GET", f"/api/meeting/{meeting}/transcript")[1]["turns"]
+    old = turns[0]["speaker"]
+
+    assert api("POST", f"/api/meeting/{meeting}/speaker", {"from": old, "to": "Anna"}
+               ) == (200, {"ok": True})
+
+    assert api("GET", f"/api/meeting/{meeting}/transcript")[1]["turns"][0]["speaker"] == "Anna"
+    assert api("GET", f"/api/meeting/{meeting}")[1]["_speakers"] == {old: "Anna"}
+    assert api("POST", f"/api/meeting/{meeting}/speaker", {"from": old, "to": " "}
+               )[1]["ok"] is False

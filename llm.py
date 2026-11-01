@@ -322,6 +322,12 @@ def summarize(turns, meta: dict, model: str = None, progress_cb=None) -> dict:
     who = (", ".join(named) if meta.get("named", True) else
            "not named in this transcript. An owner is only a name spoken in the "
            "text; when nobody is named for a task, leave the owner empty.")
+    if any(re.fullmatch(r"Speaker \d+|Them", s) for s in named):
+        # A recorded call: "Me" is the user, the others are voices without names.
+        who += (". \"Me\" is the person recording the call. \"Speaker N\" and \"Them\" are "
+                "the other people, unnamed: when the conversation shows who one of them is "
+                "(someone is called by name), use that name and add an assumption with the "
+                "quote; otherwise keep the label.")
     meta_line = (f"File: {meta.get('source', '')}\n"
                  f"File date: {meta.get('date', '')}\n"
                  f"Speakers: {who}")

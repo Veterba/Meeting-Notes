@@ -286,27 +286,62 @@ const CLOUD = `   .--.
 (___.__)_)`;
 
 // What was said, read again from the source: a downloaded file or a recording.
+// The voices can be named here; a name goes into the notes as well.
 function Transcript({ meeting, head }) {
   const [data, setData] = useState(null);
-  useEffect(() => {
-    api(`/api/meeting/${meeting.hash}/transcript`).then(setData);
-  }, [meeting.hash]);
+  const load = () => api(`/api/meeting/${meeting.hash}/transcript`).then(setData);
+  useEffect(() => { load(); }, [meeting.hash]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const voices = data && !data.error
+    ? [...new Set(data.turns.map((t) => t.speaker))].filter((s) => s !== "Me" && s !== "Unknown")
+    : [];
 
   return (
     <div className="doc">
       {head}
       {!data && <p className="dim">loading…</p>}
       {data?.error && <p className="bad">{data.error}</p>}
+      {meeting.notes && voices.length > 0 && <Voices meeting={meeting} voices={voices} onNamed={load} />}
       {data && !data.error && (
         <div className="transcript">
           {data.turns.map((t, i) => (
             <div key={i} className={`said ${t.speaker === "Me" ? "me" : "them"}`}>
-              <span className="who">{t.speaker === "Unknown" ? "" : t.speaker}</span>
+              <span className="who" title={t.speaker}>{t.speaker === "Unknown" ? "" : t.speaker}</span>
               <p>{t.text}</p>
             </div>
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+function Voices({ meeting, voices, onNamed }) {
+  const [names, setNames] = useState({});
+  const [note, setNote] = useState("");
+
+  async function save(voice) {
+    const to = (names[voice] || "").trim();
+    if (!to || to === voice) return;
+    const r = await api(`/api/meeting/${meeting.hash}/speaker`, { from: voice, to });
+    setNote(r.ok ? `${voice} is ${to} now — in the notes too` : r.error);
+    setNames({ ...names, [voice]: "" });
+    onNamed();
+  }
+
+  return (
+    <section className="voices">
+      <h3>who is who</h3>
+      {voices.map((voice) => (
+        <label key={voice} className="voice">
+          <span>{voice}</span>
+          <input placeholder="name" value={names[voice] || ""}
+                 onChange={(e) => setNames({ ...names, [voice]: e.target.value })}
+                 onKeyDown={(e) => e.key === "Enter" && save(voice)}
+                 onBlur={() => save(voice)} />
+        </label>
+      ))}
+      {note && <p className="hint">{note}</p>}
+    </section>
   );
 }

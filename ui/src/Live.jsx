@@ -40,7 +40,9 @@ export default function Live({ recording, refresh, say }) {
   const on = recording.recording;
   const s = useElapsed(recording);
   const note = status.error ? status.error
-    : !on && recording.transcribing ? "transcribing the last words…"
+    : !on && recording.transcribing
+      ? (status.status && !["listening", "done"].includes(status.status) ? `${status.status}…`
+                                                                         : "transcribing the last words…")
     : !on ? "saved — the notes are being written, they will appear under meetings"
     : status.status === "listening" ? (lines.length ? "" : "listening — the first words appear a few seconds after they are said")
     : status.status;

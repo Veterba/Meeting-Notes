@@ -26,6 +26,7 @@ import history
 import mailer
 import parser as tparser
 import paths
+import speakers
 
 # The React build (ui/ is its source; npm run build writes ui/dist).
 UI_DIR = paths.CODE / "ui" / "dist"
@@ -33,8 +34,8 @@ UI_DIR = paths.CODE / "ui" / "dist"
 TOKEN = secrets.token_urlsafe(24)
 
 # /api/meeting/<hash>, and what can be done to it
-RE_MEETING = re.compile(
-    r"^/api/meeting/([0-9a-f]{64})(?:/(send|retry|reveal|transcript|archive|transcribe))?$")
+RE_MEETING = re.compile(r"^/api/meeting/([0-9a-f]{64})"
+                        r"(?:/(send|retry|reveal|transcript|archive|transcribe|speaker))?$")
 # /api/recording/<folder name>/... and /api/archive/<entry id>/restore, names URL-encoded
 RE_RECORDING = re.compile(r"^/api/recording/([^/]+)/(archive|transcribe)$")
 RE_RESTORE = re.compile(r"^/api/archive/([^/]+)/restore$")
@@ -79,9 +80,11 @@ def transcript(meeting: str) -> dict:
     except Exception as e:
         return {"error": f"the transcript cannot be read: {e}" if src.exists()
                 else f"the transcript is no longer at {src}", "turns": []}
+    notes = notes_file(meeting)
+    data = json.loads(notes.read_text(encoding="utf-8")) if notes and notes.exists() else {}
     return {"error": "", "source": src.name,
             "recorded": src.is_relative_to(paths.recordings()),
-            "turns": [{"speaker": s, "text": t} for s, t in turns]}
+            "turns": [{"speaker": s, "text": t} for s, t in speakers.named(turns, data)]}
 
 
 def decision(d) -> dict:
@@ -237,6 +240,15 @@ class Handler(BaseHTTPRequestHandler):
         notes = notes_file(meeting)
         if not notes:
             return self._json({"error": "this meeting has no notes"}, 404)
+        if action == "speaker":
+            # A name for a voice: everywhere in the notes, and in the transcript.
+            data = json.loads(notes.read_text(encoding="utf-8"))
+            try:
+                data = speakers.rename(data, body["from"], body["to"])
+            except ValueError as e:
+                return self._json({"ok": False, "error": str(e)})
+            notes.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+            return self._json({"ok": True})
         data = body["data"]
         if action == "send":
             data["recipients"] = body["recipients"]

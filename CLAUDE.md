@@ -50,6 +50,8 @@ Files:
 - `transcriber.py` — `Live`: reads the growing WAVs, cuts utterances at pauses, transcribes
   them with a local whisper.cpp server (`WhisperServer`), drops echo, writes the call's `.vtt`,
   which `pipeline.submit` then summarises.
+- `speakers.py` — after a call: diarize `system.wav` (sherpa-onnx), relabel "them" lines as
+  Speaker N; `rename()` puts a name into the notes and `_speakers`.
 - `archive.py` — delete = move a meeting's notes and recording folder into `DATA/archive/`
   with a manifest; restore; purge after `ARCHIVE_DAYS`. The history row stays as `archived`.
 - `parser.py` — `.vtt` / `.docx` → turns; `looks_like_transcript()`.
@@ -80,7 +82,7 @@ Where things stand:
 - The parser handles old Teams, current Teams `.docx` and speakerless exports (v0.4.0),
   tested on synthetic samples only so far.
 - Recording a call (v0.6.0): both streams → live transcript (whisper.cpp) → `.vtt` → the same
-  pipeline. Next: diarization of "Them" into speakers, better echo handling. Never record in
+  pipeline; v0.7.0 splits "Them" into Speaker N. Next: automatic call detection. Never record in
   a test or a check: tests use a fake helper and a fake transcriber; a real recording is the
   user's click. Whisper models are large: download them only when the task needs it.
 

@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 import paths
+import speakers
 from transcriber import Live
 
 log = logging.getLogger("pipeline")
@@ -26,7 +27,8 @@ DEAD_MIC_SECONDS = 5
 
 
 class Recorder:
-    make_live = Live                    # replaceable, for the tests
+    # Replaceable, for the tests.
+    make_live = staticmethod(lambda folder: Live(folder, relabel=speakers.relabel))
 
     def __init__(self):
         self.proc = None

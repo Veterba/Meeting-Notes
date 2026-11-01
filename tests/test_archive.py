@@ -100,7 +100,7 @@ def test_a_call_is_transcribed_again_and_its_old_meeting_gives_way(box, summaris
     old, _ = summarised(folder, "Call 2026-11-01 10-00-00.vtt")
 
     class Whisper:                      # a second, better transcription
-        def __init__(self, folder):
+        def __init__(self, folder, **_):
             self.folder = folder
 
         def finish_all(self):

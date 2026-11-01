@@ -6,6 +6,19 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.7.0 — 2026-11-01
+### Added
+- After a call, the other side's voices are told apart (sherpa-onnx speaker diarization, about
+  30 MB of models downloaded on first use): the transcript says Speaker 1, Speaker 2… instead of
+  one "Them". One voice stays "Them".
+- *Who is who* above a meeting's transcript: naming a voice replaces it everywhere in the notes
+  and in the transcript, without running the model again.
+### Changed
+- The model is told that "Me" records the call and the speakers are unnamed, and to use a name
+  only when the conversation gives it, as an assumption with the quote.
+### Fixed
+- The bundle's `CFBundleVersion` still said 0.5.0.
+
 ## v0.6.0 — 2026-11-01
 ### Added
 - Recording a call: *Record the call* in the menu and the window. A Swift helper

@@ -314,3 +314,10 @@ blockquote { margin: var(--s1) 0 0; padding-left: var(--s3); border-left: 2px so
   border: 3px solid transparent; background-clip: padding-box; }
 
 button.more { font-size: 16px; letter-spacing: 1px; }
+
+/* Naming the voices of a recorded call, above its transcript. */
+.voices { margin-bottom: var(--s5); padding-bottom: var(--s4); border-bottom: 1px solid var(--line); }
+.voice { display: grid; grid-template-columns: 110px 220px; align-items: center; gap: var(--s2);
+  margin-bottom: var(--s1); font: 12px var(--mono); color: var(--haze); }
+.voice input { height: 28px; }
+.voices .hint { margin: var(--s2) 0 0; }

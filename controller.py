@@ -16,6 +16,7 @@ import llm
 import mailer
 import paths
 import pipeline
+import speakers
 from menu import MAIL_MODES
 from recorder import Recorder
 from transcriber import Live
@@ -278,7 +279,7 @@ class Controller:
     def _retranscribe(self, folder):
         old = self._meetings_in(folder)
         try:
-            transcript = Live(folder).finish_all()
+            transcript = Live(folder, relabel=speakers.relabel).finish_all()
             if not transcript:
                 self._notice("Nothing recognised", f"No speech was found in Call {folder.name}")
                 return

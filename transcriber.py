@@ -203,7 +203,8 @@ def stamp(seconds: float) -> str:
 def to_vtt(lines: list) -> str:
     def esc(s):
         return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    cues = [f"{stamp(line.start)} --> {stamp(line.end)}\n<v {WHO[line.who]}>{esc(line.text)}</v>"
+    cues = [f"{stamp(line.start)} --> {stamp(line.end)}\n"
+            f"<v {WHO.get(line.who, line.who)}>{esc(line.text)}</v>"
             for line in lines]
     return "WEBVTT\n\n" + "\n\n".join(cues) + "\n"
 
@@ -299,7 +300,8 @@ class WhisperServer:
                                 "temperature": "0"},
                           timeout=300)
         r.raise_for_status()
-        return (r.json().get("text") or "").strip()
+        # Whisper breaks lines inside a sentence now and then; a line is one line.
+        return " ".join((r.json().get("text") or "").split())
 
     def stop(self):
         if self.proc and self.proc.poll() is None:
@@ -329,12 +331,15 @@ class Live:
     PARTIAL_EVERY = 0.8             # seconds of new speech before a partial is redone
     PARTIAL_SHORTEST = 1.0          # less than this is too little for Whisper to guess
 
-    def __init__(self, folder: Path, transcribe=None):
+    def __init__(self, folder: Path, transcribe=None, relabel=None):
         self.folder = Path(folder)
         self.streams = {"me": (WavTail(self.folder / "mic.wav"), Segmenter()),
                         "them": (WavTail(self.folder / "system.wav"), Segmenter())}
         self.server = None if transcribe else WhisperServer()
         self._transcribe = transcribe or self.server.transcribe
+        # The last step before the .vtt: relabel(lines, folder, status) -> lines.
+        # The recorder passes speakers.relabel; the tests pass nothing.
+        self._relabel = relabel
         self.lines = []
         self.partial = {}               # who -> Line, the sentence still being said
         self._open = {}                 # who -> the reader's latest open piece
@@ -383,6 +388,11 @@ class Live:
         with self._lock:
             lines = list(self.lines)
             self.partial = {}
+        if lines and self._relabel:
+            lines = self._relabel(lines, self.folder, lambda text: self._set(status=text))
+        with self._lock:
+            self.lines = lines
+            self.version += 1
             self.status = "done"
         if not lines:
             return None

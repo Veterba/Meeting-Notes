@@ -222,6 +222,14 @@ lands in the meetings list (tagged *rec*) with its notes. Every meeting has a
 `WHISPER_LANGUAGE` (default `auto`) can be fixed to `ru` or `en`, which is more
 reliable on short phrases.
 
+**Who said what.** Everyone else in a call arrives mixed in one stream. When
+the call ends, their voices are told apart (speaker diarization with sherpa-onnx;
+two small models, about 30 MB, downloaded the first time) and their lines become
+*Speaker 1*, *Speaker 2*… — one voice stays *Them*. Above a meeting's transcript,
+*who is who* gives each voice a name; the name replaces the label in the notes as
+well, without running the model again. The model itself is told the speakers are
+unnamed and uses a name only when the conversation gives one, as an assumption.
+
 **Transcribe again** runs the speech model over a call's whole recording, for
 when the live transcript missed things; the meeting is then summarised again. A
 recording in which nothing was recognised still shows in the list, so it can be

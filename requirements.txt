@@ -6,3 +6,4 @@ requests>=2.31
 keyring>=25.0                  # the mail password, in the macOS Keychain
 rumps>=0.4                     # macOS menu bar app
 pyobjc-framework-WebKit>=10    # the window that hosts the UI
+sherpa-onnx>=2.0               # telling the voices of a recorded call apart
