@@ -163,3 +163,32 @@ def test_a_restart_during_a_slow_hand_off_leaves_one_sweeping_thread(box, transc
     finally:
         release.set()
         w.stop()
+
+
+# ---------------------------------------------------------------- Ollama on demand
+
+def test_ollama_is_let_go_once_the_queue_is_empty_not_between_jobs(
+        box, rec, worker, transcript, ollama):
+    import pipeline
+    rec.gate = threading.Event()
+    pipeline.submit(transcript(box.inbox, "first.vtt"))
+    assert rec.entered.wait(15)
+    pipeline.submit(transcript(box.inbox, "second.vtt"))    # queued behind the first
+    rec.gate.set()
+
+    assert wait_until(lambda: all_done(worker, rec, 2))
+    assert wait_until(lambda: ollama.released == 1)
+    time.sleep(0.1)
+    assert ollama.released == 1, "released between two queued jobs"
+
+
+def test_a_job_says_why_it_waits_when_ollama_is_not_installed(
+        box, rec, worker, transcript, monkeypatch):
+    import pipeline
+    monkeypatch.setattr(llm, "ollama_up", lambda: False)
+    monkeypatch.setattr(llm, "ollama_binary", lambda: "")
+    monkeypatch.setenv("OLLAMA_RETRY_SECONDS", "0.05")
+    pipeline.submit(transcript(box.inbox, "patient.vtt"))
+
+    assert wait_until(lambda: worker.snapshot()["note"] == "Ollama is not installed")
+    assert worker.snapshot()["stage"] == "waiting"

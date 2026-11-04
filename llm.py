@@ -1,14 +1,19 @@
 """Local Ollama: the one model, map-reduce, schema-constrained JSON."""
 import json
+import logging
+import os
 import re
 import shutil
 import subprocess
+import threading
 import time
 from pathlib import Path
 
 import requests
 
 import paths
+
+log = logging.getLogger("pipeline")
 
 # "Ollama is not running" as opposed to "Ollama refused": a job that hits this is
 # held and retried rather than marked failed.
@@ -107,35 +112,75 @@ def ollama_binary() -> str:
     return ""
 
 
-def start_ollama(timeout: float = 30) -> bool:
-    """Bring Ollama up if it is not already, so the user never needs a terminal."""
-    if ollama_up():
-        return True
-    exe = ollama_binary()
-    if not exe:
-        return False
-    subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)
-    deadline = time.time() + timeout
-    while time.time() < deadline:
+class Ollama:
+    """Ollama, up only while there is work for it.
+
+    The model takes about 8 GB of memory while it is loaded, so the worker
+    calls `ensure` before a job and `release` once the queue is empty, and the
+    app calls `release` when it quits. An Ollama someone else started (a
+    terminal, brew services) is left running and only the model is unloaded;
+    one the app started is stopped again. Its output goes to logs/ollama.log,
+    so when it will not start or dies, the reason is there.
+    """
+
+    def __init__(self):
+        self.proc = None
+        self._lock = threading.Lock()
+
+    def ensure(self, timeout: float = 60) -> bool:
+        """Ollama answering, started if need be. False if it cannot be."""
         if ollama_up():
             return True
-        time.sleep(0.5)
-    return False
+        exe = ollama_binary()
+        if not exe:
+            return False
+        with self._lock:
+            if self.proc is None or self.proc.poll() is not None:
+                log.info("Starting Ollama")
+                # The last run only: what matters is why it stopped or would not start.
+                with open(paths.logs() / "ollama.log", "wb") as out:
+                    self.proc = subprocess.Popen([exe, "serve"], stdout=out,
+                                                 stderr=subprocess.STDOUT,
+                                                 start_new_session=True)
+            proc = self.proc
+        deadline = time.time() + timeout
+        while time.time() < deadline and proc.poll() is None:
+            if ollama_up():
+                return True
+            time.sleep(0.5)
+        log.error("Ollama did not start (see logs/ollama.log)")
+        return False
+
+    def release(self):
+        """Give the memory back: stop our own Ollama, or unload the model."""
+        with self._lock:
+            proc, self.proc = self.proc, None
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(15)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            log.info("Stopped Ollama")
+            return
+        try:
+            requests.post(f"{url()}/api/generate", json={"model": MODEL, "keep_alive": 0},
+                          timeout=30)
+        except requests.RequestException:
+            pass                    # not running: nothing is loaded
 
 
-def installed_models() -> list:
-    try:
-        r = requests.get(f"{url()}/api/tags", timeout=5)
-        return [m["name"] for m in r.json().get("models", [])]
-    except Exception:
-        return []
+OLLAMA = Ollama()
 
 
-def has_model(name: str, installed: list = None) -> bool:
-    """Is the model downloaded? Ollama lists a bare name with ":latest" added."""
-    models = installed_models() if installed is None else installed
-    return name in models or f"{name}:latest" in models
+def model_on_disk(name: str) -> bool:
+    """Is the model downloaded? Read from Ollama's own folder, so it need not run."""
+    base, _, tag = name.partition(":")
+    parts = base.split("/")
+    parts = ["registry.ollama.ai", "library"][:3 - len(parts)] + parts
+    root = Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models")
+    return any((root / folder).joinpath(*parts, tag or "latest").is_file()
+               for folder in ("manifests", "manifests-v2"))
 
 
 def pull_model(name: str, progress_cb=None):

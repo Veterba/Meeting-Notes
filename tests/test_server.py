@@ -121,7 +121,7 @@ def test_the_page_and_its_assets_are_served_and_nothing_else(api):
 def test_the_state_has_what_the_window_shows(api, meeting):
     status, state = api("GET", "/api/state")
     assert status == 200
-    assert {"ollama_up", "model", "model_ready", "watching", "folder",
+    assert {"ollama_up", "ollama_installed", "model", "model_ready", "watching", "folder",
             "mail_mode", "recipients", "account", "job", "meetings"} <= set(state)
     assert [m["hash"] for m in state["meetings"]] == [meeting]
 
@@ -162,17 +162,18 @@ def test_the_model_is_downloaded_only_when_missing(api, app, worker, monkeypatch
     monkeypatch.setattr(app, "probe", lambda: None)
     pulled = []
     monkeypatch.setattr(llm, "pull_model", lambda name, cb=None: pulled.append(name))
-    app.net.update(ollama_up=True, model_ready=True)
+    monkeypatch.setattr(llm, "ollama_up", lambda: True)
+    app.net.update(ollama_installed=True, model_ready=True)
     assert api("POST", "/api/model/download", {}) == (200, {"ok": True})
     app.net.update(model_ready=False)
     api("POST", "/api/model/download", {})
     assert wait_until(lambda: pulled == [llm.MODEL])
 
 
-def test_no_model_is_downloaded_while_ollama_is_down(api, app, worker, monkeypatch):
+def test_no_model_is_downloaded_without_ollama_installed(api, app, worker, monkeypatch):
     pulled = []
     monkeypatch.setattr(llm, "pull_model", lambda name, cb=None: pulled.append(name))
-    app.net.update(ollama_up=False)
+    app.net.update(ollama_installed=False)
 
     status, r = api("POST", "/api/model/download", {})
 

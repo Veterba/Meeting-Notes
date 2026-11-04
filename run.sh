@@ -51,30 +51,30 @@ fi
 # MEETING_NOTES_DATA overrides it, for a dev run that must not touch the real one.
 
 # --- Ollama -------------------------------------------------------------
+# Not started here: the app wakes it when a meeting needs summarising and lets
+# it go once the queue is empty.
 command -v ollama >/dev/null || die "Ollama not found. Install it: brew install ollama"
-if ! curl -sf -m 3 http://localhost:11434/api/tags >/dev/null; then
-  say "Starting Ollama"
-  if command -v brew >/dev/null && brew services list 2>/dev/null | grep -q '^ollama'; then
-    brew services start ollama >/dev/null
-  else
-    nohup ollama serve >/dev/null 2>&1 &
-  fi
-  for _ in $(seq 1 30); do
-    curl -sf -m 2 http://localhost:11434/api/tags >/dev/null && break
-    sleep 1
-  done
-  curl -sf -m 2 http://localhost:11434/api/tags >/dev/null \
-    || die "Ollama did not come up. Try: ollama serve"
-fi
 
 # --- model --------------------------------------------------------------
 MODEL=$("$PY" -c "import llm; print(llm.MODEL)")
-if ! "$PY" -c "import llm,sys; sys.exit(0 if llm.has_model('$MODEL') else 1)"; then
+if ! "$PY" -c "import llm,sys; sys.exit(0 if llm.model_on_disk('$MODEL') else 1)"; then
   say "Model $MODEL is not downloaded"
   read -r -p "    Download it now? That is several GB. [Y/n] " answer
   case "${answer:-Y}" in
     [Nn]*) echo "    Skipped. Download it from the window's settings, or run: ollama pull $MODEL" ;;
-    *)     ollama pull "$MODEL" ;;
+    *)     # Ollama only for the download, unless it was already running.
+           if curl -sf -m 3 http://localhost:11434/api/tags >/dev/null; then
+             ollama pull "$MODEL"
+           else
+             ollama serve >/dev/null 2>&1 &
+             OLLAMA_PID=$!
+             for _ in $(seq 1 30); do
+               curl -sf -m 2 http://localhost:11434/api/tags >/dev/null && break
+               sleep 1
+             done
+             ollama pull "$MODEL"
+             kill "$OLLAMA_PID"
+           fi ;;
   esac
 fi
 

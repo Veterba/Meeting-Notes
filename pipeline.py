@@ -219,6 +219,9 @@ class Worker:
 
     The worker is deliberately independent of the watcher's lifetime: pausing or
     restarting the watcher never touches a job that is already running.
+
+    It is also what wakes Ollama: before a job, and once the queue is empty it
+    lets Ollama go again, so the model's memory is only taken while there is work.
     """
 
     def __init__(self):
@@ -281,6 +284,8 @@ class Worker:
             finally:
                 with self._lock:
                     self._waiting.discard(job.key)
+            if self.queue.empty():
+                llm.OLLAMA.release()
 
     def _run(self, job: Job):
         self._set(active=True, stage="starting", i=0, n=0, error="", result=None,
@@ -288,7 +293,7 @@ class Worker:
         try:
             if job.transcript:
                 self._process(job.transcript)
-            else:
+            elif self._wait_for_ollama(job.label):
                 self._pull(job.model)
         except Exception as e:
             self._set(error=str(e))
@@ -302,7 +307,7 @@ class Worker:
             self._set(stage=stage, i=i, n=n)
 
         while not self._stopping.is_set():
-            if not self._wait_for_ollama(t):
+            if not self._wait_for_ollama(t.src.name):
                 return
             try:
                 out = process(t, progress_cb=progress)
@@ -314,19 +319,23 @@ class Worker:
             self._emit("done", t.src.name, out)
             return
 
-    def _wait_for_ollama(self, t: Transcript) -> bool:
-        """Hold a job until Ollama answers. False if the worker is stopping."""
+    def _wait_for_ollama(self, label: str) -> bool:
+        """Wake Ollama for a job, and hold the job for as long as it cannot be
+        woken. False if the worker is stopping."""
+        self._set(note="waking Ollama")
         waited = False
-        while not llm.ollama_up():
+        while not llm.OLLAMA.ensure():
             if not waited:
-                log.info("Waiting for Ollama before %s", t.src.name)
-                self._set(stage="waiting", note="waiting for Ollama")
+                why = ("Ollama is not installed" if not llm.ollama_binary()
+                       else "Ollama would not start, see logs/ollama.log")
+                log.warning("Waiting for Ollama before %s: %s", label, why)
+                self._set(stage="waiting", note=why)
                 waited = True
             if self._stopping.wait(retry_seconds()):
                 return False
         if waited:
-            log.info("Ollama is back")
-            self._set(stage="starting", note="")
+            log.info("Ollama is up")
+        self._set(stage="starting", note="")
         return True
 
     def _pull(self, model: str):

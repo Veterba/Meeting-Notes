@@ -20,9 +20,31 @@ from types import SimpleNamespace  # noqa: E402
 
 import pytest  # noqa: E402
 
+import llm  # noqa: E402
 import pipeline  # noqa: E402
 import paths  # noqa: E402
 from helpers import write_transcript  # noqa: E402
+
+
+class FakeOllama:
+    """In place of llm.OLLAMA: up exactly when llm.ollama_up says so, which a
+    test sets, and it never starts, stops or unloads the real one."""
+
+    def __init__(self):
+        self.released = 0
+
+    def ensure(self):
+        return llm.ollama_up()
+
+    def release(self):
+        self.released += 1
+
+
+@pytest.fixture(autouse=True)
+def ollama(monkeypatch):
+    fake = FakeOllama()
+    monkeypatch.setattr(llm, "OLLAMA", fake)
+    return fake
 
 
 @pytest.fixture

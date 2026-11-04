@@ -11,7 +11,7 @@ import menu
 from helpers import fake_summarize, wait_until
 
 FACTS = {
-    "ollama_up": True, "model": "qwen3.5:9b", "model_ready": True,
+    "ollama_up": True, "ollama_installed": True, "model": "qwen3.5:9b", "model_ready": True,
     "watching": True, "folder": Path.home() / "Downloads", "mail_mode": "smtp",
     "job": {"active": False, "queued": 0, "stage": "", "file": "", "i": 0, "n": 0},
     "meetings": [],
@@ -44,11 +44,12 @@ def test_the_status_lines_say_what_is_going_on():
 def test_the_status_lines_say_when_things_are_not_going_on():
     facts = dict(FACTS, ollama_up=False, model_ready=False, watching=False)
     assert menu.status_lines(facts) == [
-        "○ Ollama: not responding",
+        "○ Ollama: asleep until needed",
         "Model: qwen3.5:9b  (not downloaded)",
         "Watching: paused",
         "Now: Idle",
     ]
+    assert menu.ollama_line(dict(facts, ollama_installed=False)) == "○ Ollama: not installed"
 
 
 def test_the_now_line_follows_the_worker():
@@ -182,8 +183,11 @@ def test_the_settings_submenu_ticks_what_is_in_use():
 def test_a_missing_model_can_be_downloaded_from_the_menu():
     settings = menu.settings_items(dict(FACTS, model_ready=False))
     assert find(settings, "Download qwen3.5:9b…").action == "download_model"
-    # Without Ollama there is nothing to download it with.
-    assert titles(menu.settings_items(dict(FACTS, ollama_up=False, model_ready=False)))[1] == "Mail"
+    # Asleep is fine, the download wakes it; not installed, nothing can.
+    assert find(menu.settings_items(dict(FACTS, ollama_up=False, model_ready=False)),
+                "Download qwen3.5:9b…")
+    assert titles(menu.settings_items(dict(FACTS, ollama_installed=False,
+                                           model_ready=False)))[1] == "Mail"
 
 
 # ---------------------------------------------------------------- from the db

@@ -6,6 +6,16 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.10.1 — 2026-11-04
+### Changed
+- Ollama runs only while there is work: the app no longer starts it on launch; the worker
+  wakes it for a summary or the model download and, once the queue is empty, stops it (or,
+  if it was already running, unloads the model). Quitting the app does the same.
+- The status says Ollama is *asleep* rather than *down*; whether the model is downloaded is
+  read from disk. A job that cannot wake Ollama says why; its output goes to `logs/ollama.log`.
+### Fixed
+- An Ollama that died after the app started was never started again; jobs waited for ever.
+
 ## v0.10.0 — 2026-11-01
 ### Added
 - Transcripts from other apps: `.srt`, `.txt` and `.md` next to `.vtt` and `.docx`; Zoom,

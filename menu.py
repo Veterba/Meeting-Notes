@@ -62,11 +62,20 @@ def job_line(job: dict) -> str:
     return f"{job.get('file') or 'a meeting'} — {stage}{waiting}"
 
 
+def ollama_line(facts: dict) -> str:
+    """Ollama is asleep until a meeting needs it, so down is not a fault."""
+    if facts.get("ollama_up"):
+        return "● Ollama: running"
+    if facts.get("ollama_installed"):
+        return "○ Ollama: asleep until needed"
+    return "○ Ollama: not installed"
+
+
 def status_lines(facts: dict) -> list:
     """The four grey lines. Two of them change while a job runs."""
     model = facts.get("model") or "—"
     return [
-        ("● Ollama: running" if facts.get("ollama_up") else "○ Ollama: not responding"),
+        ollama_line(facts),
         f"Model: {model}" + ("" if facts.get("model_ready") else "  (not downloaded)"),
         (f"Watching: {short_path(facts.get('folder'))}" if facts.get("watching")
          else "Watching: paused"),
@@ -110,7 +119,7 @@ def meeting_items(meetings) -> list:
 
 
 def settings_items(facts: dict) -> list:
-    missing = facts.get("ollama_up") and not facts.get("model_ready")
+    missing = facts.get("ollama_installed") and not facts.get("model_ready")
     return [
         Item("Folder…", action="choose_folder"),
         *([Item(f"Download {facts.get('model')}…", action="download_model")] if missing else []),

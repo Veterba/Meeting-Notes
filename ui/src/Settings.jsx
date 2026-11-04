@@ -52,14 +52,14 @@ export default function Settings({ state, refresh, say }) {
         )}
       </Group>
 
-      <Group title="model" hint={state.ollama_up
-        ? "Writes the notes, locally through Ollama."
-        : "Ollama is not answering."}>
+      <Group title="model" hint={state.ollama_installed
+        ? "Writes the notes, locally through Ollama. Ollama runs only while there is a meeting to summarise, then gives the memory back."
+        : "Ollama is not installed. Install it with: brew install ollama"}>
         <div className="inline">
           <code className="path">{state.model}</code>
           {state.model_ready
             ? <span className="ok">downloaded</span>
-            : state.ollama_up && <button onClick={downloadModel}>download · several GB</button>}
+            : state.ollama_installed && <button onClick={downloadModel}>download · several GB</button>}
         </div>
       </Group>
 

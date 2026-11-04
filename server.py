@@ -48,7 +48,7 @@ def state(app: controller.Controller) -> dict:
     for m in facts["meetings"]:
         m["recorded"] = Path(m["source"]).is_relative_to(recordings)
     return {
-        **{k: facts[k] for k in ("ollama_up", "model", "model_ready",
+        **{k: facts[k] for k in ("ollama_up", "ollama_installed", "model", "model_ready",
                                  "watching", "mail_mode", "meetings")},
         "folder": str(facts["folder"]),
         # Whatever the one worker is doing, whoever started it.

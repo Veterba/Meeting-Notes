@@ -164,7 +164,10 @@ function Status({ state }) {
   return (
     <dl className="status">
       <dt>ollama</dt>
-      <dd className={state.ollama_up ? "" : "bad"}>{state.ollama_up ? "running" : "down"}</dd>
+      <dd className={state.ollama_installed ? "" : "bad"}
+          title={state.ollama_up || !state.ollama_installed ? "" : "started when a meeting needs it"}>
+        {state.ollama_up ? "running" : state.ollama_installed ? "asleep" : "not installed"}
+      </dd>
       <dt>model</dt>
       <dd title={state.model_ready ? "" : "not downloaded yet"}>
         {state.model || "—"}{!state.model_ready && <span className="dim"> ↓</span>}

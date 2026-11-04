@@ -23,8 +23,8 @@ OPTIONS = {
         "CFBundleDisplayName": "Meeting Notes",
         "CFBundleIdentifier": "local.meetingnotes.app",
         # The version of the commit it was built from: v0.MINOR.PATCH.
-        "CFBundleShortVersionString": "0.10.0",
-        "CFBundleVersion": "0.10.0",
+        "CFBundleShortVersionString": "0.10.1",
+        "CFBundleVersion": "0.10.1",
         "LSMinimumSystemVersion": "12.0",
         "NSHighResolutionCapable": True,
         # The UI is served from 127.0.0.1, which needs an ATS exception.

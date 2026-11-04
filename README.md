@@ -24,7 +24,6 @@ git clone <this repo> meeting-notes
 cd meeting-notes
 
 brew install ollama
-brew services start ollama
 
 ./build.sh --install
 ```
@@ -255,7 +254,7 @@ the watcher does not summarise it again.
 The dropdown is the quick view of the same app:
 
 ```
-● Ollama: running
+● Ollama: running                      (or: asleep until needed)
 Model: qwen3.5:9b
 Watching: ~/Downloads                  (or: paused)
 Now: sprint-review.vtt — part 2/5      (or: Idle, or: 2 waiting)
@@ -274,8 +273,9 @@ Quit
 ```
 
 - the **four status lines** are grey and not clickable. The last two change while
-  a job runs, every two seconds; asking Ollama what it has happens every twenty,
-  off the main thread, so the menu never waits for it;
+  a job runs, every two seconds; asking whether Ollama is up happens every
+  twenty, off the main thread, so the menu never waits for it. Whether the model
+  is downloaded is read from Ollama's folder on disk, so it needs no Ollama;
 - **Recent meetings** is the last seven rows of `history.db`, newest first, with
   the status as a mark: `·` waiting, `…` working, `●` ready, `✓` sent, `✕` failed.
   A meeting that failed shows why, and offers *Reprocess* instead of notes;
@@ -453,8 +453,19 @@ as it was. A meeting that failed can be tried again with **Reprocess** in the me
 picking its file with **Process files…**; `--once --force` summarises a known
 meeting afresh.
 
-If Ollama is not running when a job comes up, the job **waits** for it instead of
-failing, and starts as soon as it answers (`OLLAMA_RETRY_SECONDS`). A meeting
+**Ollama runs only when there is work.** The model takes about 8 GB of memory
+while it is loaded, so the app does not start Ollama when it opens. The worker
+wakes it when a meeting needs summarising or the model needs downloading, and
+once the queue is empty it gives the memory back: an Ollama the app started is
+stopped, one that was already running (a terminal, `brew services`) is left
+running and only the model is unloaded. Quitting the app does the same. The
+status shows *asleep* in between, which is normal. Each summary waits 10–30 s
+more for Ollama and the model to load; several queued meetings load it once.
+Ollama's own output goes to `logs/ollama.log`.
+
+If Ollama cannot be woken — not installed, or it will not start — the job
+**waits** instead of failing, says why, and tries again every
+`OLLAMA_RETRY_SECONDS`. A meeting
 left `found` or `processing` by a quit or a crash is queued again at start-up.
 The queue holds a meeting once, however many files it arrived in.
 
@@ -497,7 +508,8 @@ In `~/Library/Application Support/Meeting Notes/`:
 | `no dialogue lines could be extracted` | format not recognised — look at the first lines and add a rule to `parser.py` |
 | ignored, "nobody speaks twice" | the file is a document, not a transcript; use **Process files…** to force it |
 | `model returned no valid JSON after 2 attempts` | model too small or chunk too large — raise the model or lower `CHUNK_TOKENS` |
-| a meeting sits at `waiting for Ollama` | Ollama is not running — the job starts by itself once it is |
+| a meeting sits at *waiting*, "Ollama would not start" | read `logs/ollama.log`; the job starts by itself once Ollama can |
+| a meeting sits at *waiting*, "Ollama is not installed" | `brew install ollama` |
 | notes only cover the start of the meeting | `NUM_CTX` too low |
 | `osascript: … not allowed` | Outlook automation not permitted yet |
 

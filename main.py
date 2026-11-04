@@ -94,7 +94,12 @@ def main():
                   + (f"\n{decision.notes}" if decision.notes else ""))
             print("Add --force to summarise it again.")
             return
-        out = process(decision.transcript, model=args.model, progress_cb=show)
+        if not llm.OLLAMA.ensure():
+            sys.exit("Ollama could not be started: brew install ollama, or see logs/ollama.log")
+        try:
+            out = process(decision.transcript, model=args.model, progress_cb=show)
+        finally:
+            llm.OLLAMA.release()
         print(out.read_text(encoding="utf-8"))
     else:
         # Headless watcher: the same queue and worker the menu bar app uses.
@@ -109,6 +114,7 @@ def main():
         finally:
             watcher.stop()
             pipeline.WORKER.stop(timeout=1)
+            llm.OLLAMA.release()
 
 
 if __name__ == "__main__":

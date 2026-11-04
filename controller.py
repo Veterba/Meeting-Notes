@@ -52,7 +52,8 @@ class Controller:
         self.watcher = None
         # What Ollama said, last time it was asked. Filled in off the main thread,
         # because asking it is a network call and no UI must wait for it.
-        self.net = {"ollama_up": False, "model": llm.MODEL, "model_ready": False}
+        self.net = {"ollama_up": False, "ollama_installed": True, "model": llm.MODEL,
+                    "model_ready": False}
         self.on_change = None           # on_change()
         self.on_notice = None           # on_notice(title, message)
         self.on_offer = None            # on_offer(offer, app): "record" or "stop"
@@ -137,17 +138,17 @@ class Controller:
         """The slow work: what was left unfinished, the Keychain and Ollama."""
         pipeline.resume()
         log.info("Keychain: %s", "available" if mailer.keychain_ready() else "NOT available")
-        if not llm.ollama_up():
-            if llm.start_ollama():
-                log.info("Started Ollama")
-            else:
-                self._notice("Ollama is not installed", "Install it with: brew install ollama")
+        # Ollama itself is woken by the worker when a meeting needs it.
+        if not llm.ollama_binary():
+            self._notice("Ollama is not installed", "Install it with: brew install ollama")
         self.probe()
 
     def probe(self):
-        """Ask Ollama what it is and what it has. Never on the main thread."""
-        up = llm.ollama_up()
-        net = {"ollama_up": up, "model": llm.MODEL, "model_ready": up and llm.has_model(llm.MODEL)}
+        """Ask Ollama whether it is up, and the disk whether the model is there.
+        Down is normal: Ollama sleeps until a meeting needs it. Never on the
+        main thread."""
+        net = {"ollama_up": llm.ollama_up(), "ollama_installed": bool(llm.ollama_binary()),
+               "model": llm.MODEL, "model_ready": llm.model_on_disk(llm.MODEL)}
         changed, self.net = net != self.net, net
         if changed:
             self._changed()
@@ -159,6 +160,7 @@ class Controller:
             if self.watcher:
                 self.watcher.stop()
                 self.watcher = None
+        llm.OLLAMA.release()
 
     # ------------------------------------------------------------ watcher
 
@@ -192,8 +194,8 @@ class Controller:
 
     def download_model(self):
         """Download the model through the worker, if it is missing."""
-        if not self.net.get("ollama_up"):
-            raise ValueError("Ollama is not running, so the model cannot be downloaded")
+        if not self.net.get("ollama_installed"):
+            raise ValueError("Ollama is not installed. Install it with: brew install ollama")
         if not self.net.get("model_ready"):
             pipeline.WORKER.submit(pipeline.Job(model=llm.MODEL))
             self._notice("Downloading the model", f"{llm.MODEL} — several GB, this takes a while")
