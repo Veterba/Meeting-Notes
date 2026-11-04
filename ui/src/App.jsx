@@ -46,17 +46,29 @@ export default function App() {
     return () => delete window.openMeeting;
   }, [refresh]);
 
-  const say = useCallback((text, kind = "") => setNotice({ text, kind, at: Date.now() }), []);
+  const say = useCallback((text, kind = "", lines = []) =>
+    setNotice({ text, kind, lines, at: Date.now() }), []);
 
-  async function pickFile() {
-    const r = await api("/api/pick", {});
+  // Files brought in by hand — picked, dropped on the window, re-checked — come
+  // back through the state, the drop from the native side, so one toast for all.
+  const lastImport = useRef(undefined);
+  useEffect(() => {
+    if (!state) return;
+    const at = state.imported?.at ?? null;
+    if (lastImport.current !== undefined && at !== lastImport.current) {
+      say(...importNotice(state.imported.results));
+    }
+    lastImport.current = at;
+  }, [state, say]);
+
+  async function pick(route) {
+    const r = await api(route, {});
     if (r.cancelled) return;
     if (r.error) say(r.error, "bad");
-    else if (r.queued) say("Queued — the notes appear here when they are ready", "ok");
-    else say(r.note ? `Not queued: ${r.note}` : "Done", r.note ? "" : "ok");
-    if (r.meeting) {
+    // One file: show it, whether it is new or summarised before.
+    if (r.results?.length === 1 && r.results[0].meeting) {
       setView("meetings");
-      setSelected(r.meeting);
+      setSelected(r.results[0].meeting);
     }
     refresh();
   }
@@ -87,7 +99,10 @@ export default function App() {
                 </button>
               </nav>
 
-              <button className="primary" onClick={pickFile}>process a file…</button>
+              <div className="pick">
+                <button className="primary" onClick={() => pick("/api/pick")}>process files…</button>
+                <button className="link" onClick={() => pick("/api/pick/folder")}>or a whole folder…</button>
+              </div>
               <Record recording={state.recording} call={state.call} refresh={refresh} say={say}
                       onStart={() => setView("live")} />
 
@@ -170,6 +185,20 @@ function Status({ state }) {
   );
 }
 
+const OUTCOMES = [["queued", "queued"], ["seen", "already here"],
+                  ["skipped", "not transcripts"], ["error", "unreadable"]];
+
+// "2 queued · 1 not transcripts", and below it what was not taken and why.
+export function importNotice(results) {
+  if (!results.length) return ["No transcripts there", ""];
+  const count = (o) => results.filter((r) => r.outcome === o).length;
+  const text = OUTCOMES.filter(([o]) => count(o)).map(([o, word]) => `${count(o)} ${word}`).join(" · ");
+  const why = results.filter((r) => r.outcome === "skipped" || r.outcome === "error")
+    .map((r) => `${r.name}: ${r.note}`);
+  const lines = why.length > 6 ? [...why.slice(0, 5), `and ${why.length - 5} more`] : why;
+  return [text, count("queued") ? "ok" : count("error") === results.length ? "bad" : "", lines];
+}
+
 function Toast({ notice, onDone }) {
   // Once per toast: onDone is a new function on every poll, and a timer
   // restarted every two seconds would never fire.
@@ -178,5 +207,10 @@ function Toast({ notice, onDone }) {
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return <div className={`glass toast ${notice.kind}`} onClick={onDone}>{notice.text}</div>;
+  return (
+    <div className={`glass toast ${notice.kind}`} onClick={onDone}>
+      {notice.text}
+      {notice.lines?.map((line) => <div key={line} className="why">{line}</div>)}
+    </div>
+  );
 }

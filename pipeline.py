@@ -29,6 +29,7 @@ class Transcript:
     hash: str
     date: str                       # the file's own date, for the model's context
     named: bool = True              # False when the format names no speakers
+    shape: str = ""                 # the parser's name for the file's layout
 
 
 def read(path) -> Transcript:
@@ -39,7 +40,7 @@ def read(path) -> Transcript:
         raise ValueError("no dialogue lines could be extracted")
     date = datetime.fromtimestamp(src.stat().st_mtime).strftime("%Y-%m-%d")
     return Transcript(src, parsed.turns, history.fingerprint(parsed.turns), date,
-                      parsed.named)
+                      parsed.named, parsed.shape)
 
 
 @dataclass
@@ -128,7 +129,7 @@ def register(path, *, by_user=True, force=False) -> Decision:
         return Decision(False, t, status, known["notes"] or "", note=f"already {status}")
 
     if not by_user and not known:
-        ok, reason = tparser.looks_like_transcript(tparser.Parsed(t.turns, t.named))
+        ok, reason = tparser.looks_like_transcript(tparser.Parsed(t.turns, t.named, t.shape))
         if not ok:
             # Recorded so the watcher stops reconsidering it on every start.
             history.record(t.hash, t.src, "skipped", error=reason)
@@ -211,7 +212,7 @@ class Job:
 class Worker:
     """The only thing in the app that runs the model, one job at a time.
 
-    Whoever wants a transcript summarised — the watcher, "Process a file…", the
+    Whoever wants a transcript summarised — the watcher, "Process files…", the
     window — puts a job here, and a single thread takes them in order. Two model
     runs at once swap a 16 GB machine into uselessness, and one queue is also the
     only honest way to show one job state in the UI no matter who started it.

@@ -14,6 +14,7 @@ import archive
 import history
 import llm
 import mailer
+import parser as tparser
 import paths
 import pipeline
 import speakers
@@ -31,13 +32,19 @@ def osa(script: str) -> str:
     return r.stdout.strip() if r.returncode == 0 else ""
 
 
-def ask_for_file() -> str:
-    return osa('POSIX path of (choose file with prompt "Choose a transcript" '
-               'of type {"vtt", "docx"})')
+def ask_for_files() -> list:
+    types = ", ".join(f'"{ext[1:]}"' for ext in sorted(tparser.EXTENSIONS))
+    return osa(f'set picked to choose file with prompt "Choose transcripts" of type {{{types}}} '
+               'with multiple selections allowed\n'
+               'set out to ""\n'
+               'repeat with f in picked\n'
+               '  set out to out & POSIX path of f & linefeed\n'
+               'end repeat\n'
+               'return out').splitlines()
 
 
-def ask_for_folder() -> str:
-    return osa('POSIX path of (choose folder with prompt "Where transcripts arrive")')
+def ask_for_folder(prompt: str = "Where transcripts arrive") -> str:
+    return osa(f'POSIX path of (choose folder with prompt "{prompt}")')
 
 
 class Controller:
@@ -56,6 +63,8 @@ class Controller:
         # recording, "stop" when the call app let go of the microphone.
         self.call = {"offer": "", "app": ""}
         self.retranscribing = {}        # recording name -> what it is doing
+        # The last files brought in by hand, file by file: {"at", "results"}.
+        self.imported = None
         self._lock = threading.Lock()
 
     # ------------------------------------------------------------ facts
@@ -273,12 +282,45 @@ class Controller:
 
     # ------------------------------------------------------------ meetings
 
-    def submit(self, path) -> pipeline.Decision:
-        """A file chosen by hand: the transcript check is skipped, and a meeting
-        already summarised is not summarised again."""
-        decision = pipeline.submit(path)
+    def import_files(self, chosen) -> dict:
+        """Files and folders brought in by hand: picked, or dropped on the window.
+
+        A file chosen on its own is summarised whatever it looks like: choosing
+        it is the check. The files inside a chosen folder were not looked at one
+        by one, so they get the watcher's transcript check, but not its age limit.
+        A meeting already summarised is never summarised again.
+        """
+        results = []
+        for path in map(Path, chosen):
+            if path.is_dir():
+                results += [self._bring(f, by_user=False) for f in tparser.files_in(path)]
+            else:
+                results.append(self._bring(path, by_user=True))
+        return self._report(results)
+
+    def recheck_skipped(self) -> dict:
+        """Judge the files the transcript check turned down again, with the
+        parser as it is now. A file that has gone is forgotten."""
+        results = []
+        for row in history.skipped():
+            history.forget(row["hash"])
+            src = Path(row["source"])
+            if src.exists():
+                results.append(self._bring(src, by_user=False))
+        return self._report(results)
+
+    @staticmethod
+    def _bring(path: Path, by_user: bool) -> dict:
+        d = pipeline.submit(path, by_user=by_user)
+        outcome = ("error" if d.error else "queued" if d.queued
+                   else "skipped" if d.status == "skipped" else "seen")
+        return {"name": path.name, "meeting": d.meeting, "outcome": outcome,
+                "note": d.error or d.note, "notes": d.notes}
+
+    def _report(self, results: list) -> dict:
+        self.imported = {"at": time.time(), "results": results}
         self._changed()
-        return decision
+        return self.imported
 
     def retry(self, meeting: str) -> pipeline.Decision:
         decision = pipeline.retry(meeting)

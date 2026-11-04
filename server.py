@@ -61,6 +61,10 @@ def state(app: controller.Controller) -> dict:
         "recordings": app.lone_recordings(),
         "archive": archive.entries(),
         "archive_days": archive.days(),
+        # What became of the last files brought in by hand, and how many files
+        # the transcript check has turned down.
+        "imported": app.imported,
+        "skipped": len(history.skipped()),
     }
 
 
@@ -181,7 +185,8 @@ class Handler(BaseHTTPRequestHandler):
         m = RE_RECORDING.match(path) or RE_RESTORE.match(path)
         if m:
             return self._library(m, unquote(m.group(1)))
-        route = {"/api/pick": self._pick, "/api/folder": self._folder,
+        route = {"/api/pick": self._pick, "/api/pick/folder": self._pick_folder,
+                 "/api/recheck": self._recheck, "/api/folder": self._folder,
                  "/api/settings": self._settings, "/api/account": self._account,
                  "/api/record": self._record,
                  "/api/call/dismiss": self._dismiss_call,
@@ -270,10 +275,19 @@ class Handler(BaseHTTPRequestHandler):
     # Each of these returns what the page is told.
 
     def _pick(self, _body):
-        path = controller.ask_for_file()
-        if not path:
+        chosen = controller.ask_for_files()
+        if not chosen:
             return {"ok": False, "cancelled": True}
-        return decision(self.app.submit(path))
+        return {"ok": True, **self.app.import_files(chosen)}
+
+    def _pick_folder(self, _body):
+        folder = controller.ask_for_folder("Choose a folder of transcripts")
+        if not folder:
+            return {"ok": False, "cancelled": True}
+        return {"ok": True, **self.app.import_files([folder])}
+
+    def _recheck(self, _body):
+        return {"ok": True, **self.app.recheck_skipped()}
 
     def _folder(self, _body):
         path = controller.ask_for_folder()

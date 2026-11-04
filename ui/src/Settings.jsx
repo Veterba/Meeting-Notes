@@ -17,6 +17,12 @@ export default function Settings({ state, refresh, say }) {
     refresh();
   }
 
+  async function recheck() {
+    const r = await api("/api/recheck", {});
+    if (r.error) say(r.error, "bad");
+    refresh();
+  }
+
   async function chooseFolder() {
     const r = await api("/api/folder", {});
     if (r.error) say(r.error, "bad");
@@ -27,7 +33,7 @@ export default function Settings({ state, refresh, say }) {
     <div className="settings">
       <h1>settings</h1>
 
-      <Group title="inbox" hint="Where Teams transcripts land. New ones are picked up by themselves.">
+      <Group title="inbox" hint="Where transcripts land: Teams, Zoom, Meet, Otter, subtitles or plain text. New ones are picked up by themselves.">
         <div className="inline">
           <code className="path" title={state.folder}>{shortPath(state.folder)}</code>
           <button onClick={chooseFolder}>change…</button>
@@ -38,6 +44,12 @@ export default function Settings({ state, refresh, say }) {
           <span className="knob" />
           watch the folder
         </label>
+        {state.skipped > 0 && (
+          <div className="inline">
+            <span className="hint">{state.skipped} {state.skipped === 1 ? "file was" : "files were"} not taken as transcripts</span>
+            <button onClick={recheck}>check again</button>
+          </div>
+        )}
       </Group>
 
       <Group title="model" hint={state.ollama_up

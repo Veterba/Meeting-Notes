@@ -180,19 +180,65 @@ def test_no_model_is_downloaded_while_ollama_is_down(api, app, worker, monkeypat
     assert pulled == []
 
 
-def test_a_file_is_picked_in_a_dialog_the_server_opens(api, box, worker, monkeypatch,
+def test_files_are_picked_in_a_dialog_the_server_opens(api, app, box, worker, monkeypatch,
                                                        transcript):
     monkeypatch.setattr(llm, "summarize", fake_summarize)
     monkeypatch.setattr(llm, "ollama_up", lambda: True)
-    monkeypatch.setattr(controller, "ask_for_file", lambda: "")
+    monkeypatch.setattr(controller, "ask_for_files", lambda: [])
     assert api("POST", "/api/pick", {})[1] == {"ok": False, "cancelled": True}
 
-    path = transcript(box.inbox, "picked.vtt")
-    monkeypatch.setattr(controller, "ask_for_file", lambda: str(path))
+    picked = [transcript(box.inbox, "picked.vtt"), box.inbox / "notes.txt"]
+    picked[1].write_text("Just a line someone wrote down.")
+    monkeypatch.setattr(controller, "ask_for_files", lambda: [str(p) for p in picked])
     status, r = api("POST", "/api/pick", {})
 
-    assert (status, r["ok"], r["queued"]) == (200, True, True)
-    assert wait_until(lambda: history.find(r["meeting"])["status"] == "ready")
+    # Picked by hand, so even a file that is no transcript goes to the model.
+    assert status == 200 and [x["outcome"] for x in r["results"]] == ["queued", "queued"]
+    assert wait_until(lambda: history.find(r["results"][0]["meeting"])["status"] == "ready")
+    # The page learns what happened from the state, a drop on the window included.
+    assert api("GET", "/api/state")[1]["imported"]["at"] == r["at"]
+
+    status, r = api("POST", "/api/pick", {})
+    assert r["results"][0]["outcome"] == "seen" and r["results"][0]["notes"]
+
+
+def test_a_folder_of_transcripts_is_checked_file_by_file(api, box, worker, monkeypatch,
+                                                          transcript, tmp_path):
+    monkeypatch.setattr(llm, "summarize", fake_summarize)
+    monkeypatch.setattr(llm, "ollama_up", lambda: True)
+    folder = tmp_path / "old calls"
+    (folder / "2025").mkdir(parents=True)
+    transcript(folder, "a.vtt")
+    transcript(folder / "2025", "b.vtt")
+    transcript(folder, "same as a.vtt", topic="a")
+    (folder / "invoice.docx").write_bytes(b"not a docx")
+    (folder / "readme.md").write_text("# Read me\n\nInstall: run the script.\n")
+    (folder / "photo.jpg").write_bytes(b"")
+    monkeypatch.setattr(controller, "ask_for_folder", lambda prompt: str(folder))
+
+    status, r = api("POST", "/api/pick/folder", {})
+
+    got = {x["name"]: x["outcome"] for x in r["results"]}
+    assert got == {"a.vtt": "queued", "same as a.vtt": "seen", "b.vtt": "queued",
+                   "invoice.docx": "error", "readme.md": "skipped"}
+    assert api("GET", "/api/state")[1]["skipped"] == 1
+
+
+def test_files_turned_down_are_checked_again(api, box, worker, monkeypatch, transcript):
+    monkeypatch.setattr(llm, "summarize", fake_summarize)
+    monkeypatch.setattr(llm, "ollama_up", lambda: True)
+    # As an older parser left them: one file that reads as a meeting now, one gone.
+    history.record("old-hash", transcript(box.inbox, "now readable.vtt"), "skipped",
+                   error="no speaker names found")
+    history.record("gone-hash", box.inbox / "deleted.vtt", "skipped")
+    assert api("GET", "/api/state")[1]["skipped"] == 2
+
+    status, r = api("POST", "/api/recheck", {})
+
+    assert [(x["name"], x["outcome"]) for x in r["results"]] == [("now readable.vtt", "queued")]
+    assert history.find("old-hash") is None and history.find("gone-hash") is None
+    assert wait_until(lambda: history.find(r["results"][0]["meeting"])["status"] == "ready")
+    assert api("GET", "/api/state")[1]["skipped"] == 0
 
 
 def test_a_folder_is_chosen_in_a_dialog_too(api, app, temp_env, tmp_path, monkeypatch):

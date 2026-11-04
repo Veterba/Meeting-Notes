@@ -139,6 +139,20 @@ def sources() -> list:
         return [r["source"] for r in conn.execute("SELECT source FROM meetings")]
 
 
+def skipped() -> list:
+    """Files the transcript check turned down, oldest first."""
+    with _db() as conn:
+        rows = conn.execute("SELECT * FROM meetings WHERE status = 'skipped' "
+                            "ORDER BY found_at, rowid").fetchall()
+    return [dict(r) for r in rows]
+
+
+def forget(meeting: str):
+    """Drop a row, so the file it came from is judged afresh next time."""
+    with _db() as conn:
+        conn.execute("DELETE FROM meetings WHERE hash = ?", (meeting,))
+
+
 def unfinished() -> list:
     """Meetings found or being processed: what a quit or a crash left half done."""
     with _db() as conn:

@@ -1,17 +1,22 @@
-"""Parse meeting transcripts (.vtt / .docx) into speaker turns.
+"""Parse meeting transcripts (.vtt / .srt / .docx / .txt / .md) into speaker turns.
 
 Each file is one of a few known shapes, and the shape is decided first, from the
 whole file, before any line is read as a speaker or as text. Reading line by line
 with every rule switched on at once is what turned dates and sentences with a
 colon into speakers. The shapes:
 
-  .vtt  voice      current and old Teams: <v Name>text</v>, any timecode style
-  .vtt  named      no voice tags; "Name: text" lines, or no speakers at all
-  .docx heading    current Teams: a header, then "Name   0:03" and the text below
-  .docx timecode   old Teams: "0:0:0.0 --> 0:0:13.370", the name, the text
-  .docx segments   speech-to-text exports: "[00:00:00.660 - 00:00:13.080] text",
-                   no speakers at all
-  .docx named      "Name: text" lines, or plain text with no speakers
+  subtitles (.vtt, .srt), cue by cue:
+    voice      current and old Teams: <v Name>text</v>, any timecode style
+    named      Zoom and most others: "Name: text" in the cue
+    subtitles  no speakers at all: one turn per cue
+  lines (.docx paragraphs, .txt and .md lines):
+    heading    current Teams and Otter: "Name   0:03", or Zoom's "[Name] 10:15:32",
+               then the text below
+    timecode   old Teams: "0:0:0.0 --> 0:0:13.370", the name, the text
+    segments   speech-to-text exports: "[00:00:00.660 - 00:00:13.080] text",
+               no speakers at all
+    named      "Name: text" lines, a timestamp allowed around the name (Google
+               Meet, Granola, chat logs), or plain text with no speakers
 """
 import re
 from dataclasses import dataclass
@@ -25,16 +30,26 @@ UNKNOWN = "Unknown"
 RE_TIMECODE = re.compile(r"^\d{1,2}:\d{1,2}(:\d{1,2})?([.,]\d{1,3})?\s*-->")
 # "<v Ivan Petrov>text</v>", the closing tag optional, a class allowed: <v.loud …>
 RE_VOICE = re.compile(r"<v(?:\.[^\s>]*)?\s+([^>]+?)\s*>(.*?)(?:</v>)?\s*$", re.S)
+# A clock time or an offset: "0:03", "00:01:23.660", "10:15:32 AM"
+STAMP = r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?(?:\s*[AP]M)?"
 # "Ivan Petrov: text" (colon after a short name)
 RE_NAMED = re.compile(r"^([^:]{2,60}?):\s+(.+)$", re.S)
-# "Ivan Petrov<tab>12:34" — the speaker heading in a current Teams .docx. The
-# separator may be a tab, several spaces or a single one; the time may carry AM/PM.
-RE_HEADING = re.compile(r"^(.{2,60}?)[\s ]+\d{1,2}:\d{2}(:\d{2})?(\s*[AP]M)?$", re.I)
-# "[00:00:00.660 - 00:00:13.080] text"
-STAMP = r"(?:\d{1,2}:)?\d{1,2}:\d{2}(?:[.,]\d+)?"
-RE_SEGMENT = re.compile(rf"^\[\s*{STAMP}\s*[-–—]\s*{STAMP}\s*\]\s*(.*)$")
-# "Ivan Petrov started transcription" — a line Teams writes, not one anybody said
-RE_TRANSCRIPTION = re.compile(r"^.{2,60} (started|stopped) transcription$", re.I)
+# "Ivan Petrov (00:01:23): text" — the colons of the time would stop RE_NAMED
+RE_NAMED_STAMPED = re.compile(rf"^(.{{2,60}}?)\s*[(\[]{STAMP}[)\]]\s*:\s+(.+)$", re.S | re.I)
+# "[00:01:23] " or "00:01:23 - " in front of a named line
+RE_LEAD_STAMP = re.compile(rf"^[(\[]?{STAMP}[)\]]?\s*[-–]?\s*", re.I)
+# A line that is only a time: Google Meet writes one every few minutes
+RE_STAMP_LINE = re.compile(rf"^[(\[]?{STAMP}[)\]]?$", re.I)
+# The speaker heading of a current Teams .docx, Otter and Zoom: "Ivan Petrov<tab>12:34",
+# "Ivan Petrov - 0:03", "Ivan Petrov (0:03)", "[Ivan Petrov] 10:15:32". The separator
+# may be a tab, several spaces or a single one.
+RE_HEADING = re.compile(rf"^\[?(.{{2,60}}?)\]?[\s ]+(?:[-–|][\s ]*)?\(?{STAMP}\)?$", re.I)
+# "[00:00:00.660 - 00:00:13.080] text", or whisper's "[00:00.000 --> 00:05.000] text"
+RE_SEGMENT = re.compile(rf"^\[\s*{STAMP}\s*(?:-->|[-–—])\s*{STAMP}\s*\]\s*(.*)$")
+# Lines the app writes, not anybody in the meeting: "Ivan Petrov started
+# transcription" (Teams), "Meeting ended after 00:31:44" (Google Meet)
+RE_SERVICE = re.compile(r"^(.{2,60} (started|stopped) transcription|meeting ended after\b.*)$",
+                        re.I)
 RE_TAGS = re.compile(r"<[^>]+>")
 RE_CUE_GUID = re.compile(r"[0-9a-fA-F\-]{8,}(/\d+-\d+)?")
 
@@ -50,6 +65,7 @@ class Parsed:
     """
     turns: list                     # [(speaker, text), ...]
     named: bool = True
+    shape: str = ""                 # which of the shapes above it was read as
 
 
 def _clean(text: str) -> str:
@@ -95,51 +111,101 @@ def _looks_like_name(s: str) -> bool:
     return sum(not w[0].islower() for w in words) * 2 >= len(words)
 
 
-# ---------------------------------------------------------------- .vtt
+# ---------------------------------------------------------------- reading
 
-def _vtt_body(path: Path) -> list:
-    """The cue text lines of a .vtt, without the header, timecodes and cue ids."""
-    lines = Path(path).read_text(encoding="utf-8-sig", errors="replace").splitlines()
-    body, started = [], False
+EXTENSIONS = {".vtt", ".srt", ".docx", ".txt", ".md"}
+
+
+def is_candidate(path) -> bool:
+    """A file the app would read: a transcript extension, and not a hidden or an
+    Office lock file ("~$Meeting.docx")."""
+    p = Path(path)
+    return p.suffix.lower() in EXTENSIONS and not p.name.startswith((".", "~"))
+
+
+def files_in(folder) -> list:
+    """Every candidate file in a folder and its subfolders, hidden folders left out."""
+    folder = Path(folder)
+    return sorted(p for p in folder.rglob("*")
+                  if p.is_file() and is_candidate(p)
+                  and not any(part.startswith(".") for part in p.relative_to(folder).parts))
+
+
+def _read_text(path) -> str:
+    """A text file's contents. Windows tools write UTF-16 with a byte order mark."""
+    data = Path(path).read_bytes()
+    if data.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return data.decode("utf-16", errors="replace")
+    return data.decode("utf-8-sig", errors="replace")
+
+
+def _voice(line: str):
+    """(speaker, text) of a "<v Name>text</v>" line, or None."""
+    m = RE_VOICE.match(line)
+    return (_clean(m.group(1)), _clean(m.group(2))) if m else None
+
+
+def _named(line: str):
+    """(speaker, text) of a "Name: text" line, or None. A time next to the name,
+    in front of it or in brackets after it, is not part of the name."""
+    bare = RE_LEAD_STAMP.sub("", line)
+    m = RE_NAMED_STAMPED.match(bare) or RE_NAMED.match(bare)
+    if not m or bare.startswith("http"):
+        return None
+    return _clean(m.group(1)), _clean(m.group(2))
+
+
+# ---------------------------------------------------------------- subtitles
+
+def _cues(path: Path) -> list:
+    """The text lines of each cue of a .vtt or .srt, without the header,
+    timecodes and cue ids."""
+    lines = _read_text(path).splitlines()
+    cues = []
     for i, raw in enumerate(lines):
         s = raw.strip()
         # Everything before the first timecode is the file header: WEBVTT,
         # X-TIMESTAMP-MAP, NOTE blocks and so on.
         if RE_TIMECODE.match(s):
-            started = True
+            cues.append([])
             continue
-        if not started or not s:
+        if not cues or not s:
             continue
         # The line right before a timecode is a cue identifier, whatever its shape.
         if i + 1 < len(lines) and RE_TIMECODE.match(lines[i + 1].strip()):
             continue
         if s.split()[0].upper() in SERVICE_WORDS or s.isdigit() or RE_CUE_GUID.fullmatch(s):
             continue
-        body.append(s)
-    return body
+        cues[-1].append(s)
+    return [c for c in cues if c]
 
 
 def parse_vtt(path: Path) -> Parsed:
-    body = _vtt_body(path)
-    voiced = any(RE_VOICE.match(line) for line in body)
-    turns, current = [], UNKNOWN
+    """A .vtt or an .srt: voice tags, "Name: text" cues, or no speakers at all."""
+    cues = _cues(path)
+    body = [line for cue in cues for line in cue]
+    if any(_voice(line) for line in body):
+        shape, said = "voice", _voice
+    elif sum(bool((n := _named(line)) and _looks_like_name(n[0])) for line in body) >= 2:
+        shape, said = "named", _named
+    else:
+        # Nobody named: a speech-to-text export, or a film. One turn per cue,
+        # like the segments of a .docx export.
+        turns = [(UNKNOWN, _clean(" ".join(cue))) for cue in cues]
+        return Parsed([t for t in turns if t[1]], named=False, shape="subtitles")
+    turns = []
     for line in body:
-        m = RE_VOICE.match(line) if voiced else None
-        if not voiced:
-            m = RE_NAMED.match(line)
-            if m and line.startswith("http"):
-                m = None
-        if m:
-            current = _clean(m.group(1))
-            turns.append([current, _clean(m.group(2))])
+        turn = said(line)
+        if turn:
+            turns.append(list(turn))
         elif turns:                         # the rest of the turn on the next line
             turns[-1][1] = f"{turns[-1][1]} {_clean(line)}".strip()
         else:
-            turns.append([current, _clean(line)])
-    return Parsed(_merge(turns))
+            turns.append([UNKNOWN, _clean(line)])
+    return Parsed(_merge(turns), shape=shape)
 
 
-# ---------------------------------------------------------------- .docx
+# ---------------------------------------------------------------- lines
 
 def _docx_lines(path: Path) -> list:
     """Every non-empty line, a paragraph's soft line breaks included."""
@@ -151,13 +217,30 @@ def _docx_lines(path: Path) -> list:
     return lines
 
 
+def _text_lines(path: Path) -> list:
+    """Every non-empty line of a .txt or .md, without Markdown's headings,
+    quote and list marks, and bold: "**Ivan:** text" is "Ivan: text"."""
+    lines = []
+    for raw in _read_text(path).splitlines():
+        s = re.sub(r"^(#+|>|[-*+])\s+", "", raw.strip())
+        s = s.replace("**", "").replace("__", "").strip()
+        if s:
+            lines.append(s)
+    return lines
+
+
 def _heading(line: str):
     """The speaker of a "Name   0:03" heading, or None."""
     m = RE_HEADING.match(line)
     return _clean(m.group(1)) if m and _looks_like_name(m.group(1)) else None
 
 
-def _docx_shape(lines: list) -> str:
+def _said(lines: list) -> list:
+    """The lines without those nobody said: the app's own notes and bare times."""
+    return [line for line in lines if not (RE_SERVICE.match(line) or RE_STAMP_LINE.match(line))]
+
+
+def _shape(lines: list) -> str:
     def count(test):
         return sum(1 for line in lines if test(line))
 
@@ -170,7 +253,7 @@ def _docx_shape(lines: list) -> str:
     return "named"
 
 
-def _docx_segments(lines):
+def _segments(lines):
     turns = []
     for line in lines:
         m = RE_SEGMENT.match(line)
@@ -181,10 +264,10 @@ def _docx_segments(lines):
         # Anything before the first segment is the template's own header.
     # One turn per segment, never merged: a speech-to-text export is long, and
     # the map step needs somewhere to cut it.
-    return Parsed([t for t in turns if t[1]], named=False)
+    return [t for t in turns if t[1]]
 
 
-def _docx_timecode(lines):
+def _timecode(lines):
     turns, speaker, expect_name = [], None, False
     for line in lines:
         if RE_TIMECODE.match(line):
@@ -196,29 +279,27 @@ def _docx_timecode(lines):
         expect_name = False
         if speaker:
             turns.append([speaker, _clean(line)])
-    return Parsed(_merge(turns))
+    return _merge(turns)
 
 
-def _docx_heading(lines):
+def _headings(lines):
     turns, speaker = [], None
-    for line in lines:
-        if RE_TRANSCRIPTION.match(line):
-            continue
+    for line in _said(lines):
         name = _heading(line)
         if name:
             speaker = name
         elif speaker:                       # before the first heading: the header
             turns.append([speaker, _clean(line)])
-    return Parsed(_merge(turns))
+    return _merge(turns)
 
 
-def _docx_named(lines):
+def _named_lines(lines):
     turns, speaker, header = [], None, []
-    for line in lines:
-        m = RE_NAMED.match(line)
-        if m:
-            speaker = _clean(m.group(1))
-            turns.append([speaker, _clean(m.group(2))])
+    for line in _said(lines):
+        turn = _named(line)
+        if turn:
+            speaker = turn[0]
+            turns.append(list(turn))
         elif speaker:
             turns.append([speaker, _clean(line)])
         else:
@@ -226,16 +307,17 @@ def _docx_named(lines):
     # No speaker found at all — hand back the text rather than lose it.
     if not turns and header:
         turns = [[UNKNOWN, " ".join(header)]]
-    return Parsed(_merge(turns))
+    return _merge(turns)
 
 
-DOCX_SHAPES = {"segments": _docx_segments, "timecode": _docx_timecode,
-               "heading": _docx_heading, "named": _docx_named}
+LINE_SHAPES = {"segments": _segments, "timecode": _timecode,
+               "heading": _headings, "named": _named_lines}
 
 
-def parse_docx(path: Path) -> Parsed:
-    lines = _docx_lines(path)
-    return DOCX_SHAPES[_docx_shape(lines)](lines)
+def parse_lines(lines: list) -> Parsed:
+    """A .docx, .txt or .md, as its lines."""
+    shape = _shape(lines)
+    return Parsed(LINE_SHAPES[shape](lines), named=shape != "segments", shape=shape)
 
 
 # ---------------------------------------------------------------- the rest
@@ -243,10 +325,16 @@ def parse_docx(path: Path) -> Parsed:
 def parse(path) -> Parsed:
     path = Path(path)
     ext = path.suffix.lower()
-    if ext == ".vtt":
+    if ext in (".vtt", ".srt"):
         return parse_vtt(path)
     if ext == ".docx":
-        return parse_docx(path)
+        return parse_lines(_docx_lines(path))
+    if ext in (".txt", ".md"):
+        lines = _text_lines(path)
+        # Some apps save their subtitles as .txt.
+        if lines and lines[0].upper().startswith("WEBVTT"):
+            return parse_vtt(path)
+        return parse_lines(lines)
     raise ValueError(f"Unsupported format: {ext}")
 
 
@@ -269,8 +357,9 @@ def looks_like_transcript(parsed: Parsed) -> tuple:
     Returns (ok, reason). Cheap: runs on the already parsed turns, no LLM call.
 
     A speech-to-text export is recognised by its shape alone and only has to be
-    long enough. Anything else has to pass three signals, in order of how much
-    they discriminate:
+    long enough. Subtitles with no names are turned down: they could be a film.
+    Anything else has to pass three signals, in order of how much they
+    discriminate:
       1. Somebody is speaking at all. A movie subtitle file carries no speaker
          tags and an ordinary document has no speaker headings, so both collapse
          into one Unknown turn.
@@ -291,6 +380,9 @@ def looks_like_transcript(parsed: Parsed) -> tuple:
     distinct = [s for s in speakers(turns) if s != UNKNOWN]
     if parsed.named and not distinct:
         return False, "no speaker names found"
+    if parsed.shape == "subtitles":
+        # Without names, a film's subtitles look the same as a call's.
+        return False, "subtitles with no speaker names, as likely a film as a meeting"
 
     if len(turns) < min_turns:
         return False, f"only {len(turns)} turns, need at least {min_turns}"

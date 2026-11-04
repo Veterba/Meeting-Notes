@@ -4,10 +4,9 @@ import threading
 import time
 from pathlib import Path
 
+import parser as tparser
 import paths
 import pipeline
-
-EXTENSIONS = {".vtt", ".docx"}
 
 log = logging.getLogger("pipeline")
 
@@ -103,7 +102,7 @@ class Watcher:
 
     def _note(self, path):
         p = Path(path)
-        if p.suffix.lower() in EXTENSIONS and not p.name.startswith((".", "~")):
+        if tparser.is_candidate(p):
             with self._lock:
                 self._pending.setdefault(str(p.resolve()), (-1, time.time()))
 
@@ -112,7 +111,7 @@ class Watcher:
         cutoff = time.time() - max_age * 3600
         skipped = 0
         for f in self.inbox.iterdir():
-            if not f.is_file() or f.suffix.lower() not in EXTENSIONS:
+            if not f.is_file() or not tparser.is_candidate(f):
                 continue
             if f.stat().st_mtime >= cutoff:
                 self._note(f)

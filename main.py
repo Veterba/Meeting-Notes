@@ -61,6 +61,7 @@ def main():
         print(f"Verdict:  {'looks like a transcript' if ok else 'NOT a transcript — ' + reason}")
         print(f"Meeting:  {meeting[:16]}"
               + (f"  (already {known['status']})" if known else "  (new)"))
+        print(f"Shape:    {parsed.shape}")
         print(f"Turns:    {len(turns)}")
         print("Speakers: " + (", ".join(tparser.speakers(turns)) if parsed.named
                               else "none named in this format"))

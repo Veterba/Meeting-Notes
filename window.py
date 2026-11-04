@@ -7,8 +7,10 @@ the page is what drags the window, since a web view keeps its clicks.
 """
 import re
 
-from AppKit import (NSApp, NSAppearance, NSBackingStoreBuffered, NSColor, NSMakeRect,
-                    NSMenu, NSMenuItem, NSScreen, NSView, NSWindow,
+import objc
+from AppKit import (NSApp, NSAppearance, NSBackingStoreBuffered, NSColor,
+                    NSDragOperationCopy, NSMakeRect, NSMenu, NSMenuItem,
+                    NSPasteboardURLReadingFileURLsOnlyKey, NSScreen, NSView, NSWindow,
                     NSWindowStyleMaskClosable, NSWindowStyleMaskFullSizeContentView,
                     NSWindowStyleMaskMiniaturizable, NSWindowStyleMaskResizable,
                     NSWindowStyleMaskTitled, NSWindowTitleHidden)
@@ -35,11 +37,49 @@ class DragStrip(NSView):
             self.window().performWindowDragWithEvent_(event)
 
 
+def dropped_files(info) -> list:
+    """The paths of the files being dragged, if what is dragged is files."""
+    urls = info.draggingPasteboard().readObjectsForClasses_options_(
+        [NSURL], {NSPasteboardURLReadingFileURLsOnlyKey: True})
+    return [str(u.path()) for u in urls or []]
+
+
+class DropWebView(WKWebView):
+    """The web view, taking files dropped on it. The page itself would only get a
+    dropped file's contents, never where it is, so the drop is caught here and
+    the paths go to `on_files`. Anything else dragged is the page's own business.
+    """
+
+    def draggingEntered_(self, info):
+        if dropped_files(info):
+            return NSDragOperationCopy
+        return objc.super(DropWebView, self).draggingEntered_(info)
+
+    def draggingUpdated_(self, info):
+        if dropped_files(info):
+            return NSDragOperationCopy
+        return objc.super(DropWebView, self).draggingUpdated_(info)
+
+    def performDragOperation_(self, info):
+        files = dropped_files(info)
+        if not files:
+            return objc.super(DropWebView, self).performDragOperation_(info)
+        if self.on_files:
+            self.on_files(files)
+        return True
+
+    def concludeDragOperation_(self, info):
+        # Left to WebKit, a dropped file is opened in the page in place of the app.
+        if not dropped_files(info):
+            objc.super(DropWebView, self).concludeDragOperation_(info)
+
+
 class AppWindow:
     """One reusable window. Closing it hides the window, it never quits the app."""
 
-    def __init__(self, url: str):
+    def __init__(self, url: str, on_files=None):
         self.url = url
+        self.on_files = on_files        # on_files(paths), on the main thread
         self.window = None
         self.webview = None
 
@@ -68,8 +108,9 @@ class AppWindow:
         self.window.setReleasedWhenClosed_(False)
 
         config = WKWebViewConfiguration.alloc().init()
-        self.webview = WKWebView.alloc().initWithFrame_configuration_(
+        self.webview = DropWebView.alloc().initWithFrame_configuration_(
             self.window.contentView().bounds(), config)
+        self.webview.on_files = self.on_files
         # No white flash before the page has drawn its sky.
         self.webview.setValue_forKey_(False, "drawsBackground")
         self.webview.setAutoresizingMask_(1 << 1 | 1 << 4)   # width | height

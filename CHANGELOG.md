@@ -6,6 +6,16 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.10.0 — 2026-11-01
+### Added
+- Transcripts from other apps: `.srt`, `.txt` and `.md` next to `.vtt` and `.docx`; Zoom,
+  Google Meet, Otter and Markdown layouts, a time before or after the name, UTF-16 text.
+  Subtitles that name nobody are one turn per cue; the watcher turns them down (a film?).
+- *Process files…* takes several files, *or a whole folder…* a folder and its subfolders
+  (checked like the watcher's, with no age limit), and files or folders can be dropped on
+  the window. A toast says, file by file, what was queued, already there or turned down.
+- Settings → *inbox* counts the files turned down, and *check again* re-reads them.
+
 ## v0.9.0 — 2026-11-01
 ### Changed
 - One model, `qwen3.5:9b`: the model choice, `OLLAMA_MODEL` and the RAM thresholds are gone;

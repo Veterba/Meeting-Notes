@@ -144,7 +144,7 @@ def tree(facts: dict) -> list:
         Item("Open Meeting Notes", action="open_window", key="o"),
         record_item(facts.get("recording") or {}, facts.get("call")),
         Item("Recent meetings", children=tuple(meeting_items(facts.get("meetings")))),
-        Item("Process a file…", action="pick_file"),
+        Item("Process files…", action="pick_file"),
         Item("Watch the folder", action="toggle_watching",
              checked=bool(facts.get("watching"))),
         SEPARATOR,

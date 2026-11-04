@@ -112,7 +112,7 @@ export default function Meetings({ state, archive, selected, onSelect, refresh, 
             <pre>{CLOUD}</pre>
             {archive ? (all.length ? "pick something to restore" : "nothing deleted")
               : all.length ? "pick a meeting"
-              : <span>no meetings yet<br />record a call, process a file,<br />or drop a Teams transcript into the watched folder</span>}
+              : <span>no meetings yet<br />record a call, process files<br />or drop them on this window</span>}
           </div>
         )}
       </section>

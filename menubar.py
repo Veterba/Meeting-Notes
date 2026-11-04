@@ -19,7 +19,7 @@ import main
 import menu
 import paths
 import pipeline
-from controller import Controller, ask_for_file, ask_for_folder
+from controller import Controller, ask_for_files, ask_for_folder
 
 ICON = paths.CODE / "assets" / "icon.png"
 ICON_PAUSED = paths.CODE / "assets" / "icon-paused.png"
@@ -101,7 +101,10 @@ class TranscriptApp(rumps.App):
         import server
         import window
         url, _token, self.httpd = server.serve(self.app)
-        self.window = window.AppWindow(url)
+        # Files dropped on the window are read off the main thread: a folder
+        # can hold hundreds. The page shows what became of them.
+        self.window = window.AppWindow(url, on_files=lambda chosen: threading.Thread(
+            target=self.app.import_files, args=(chosen,), name="import", daemon=True).start())
 
         self.app.start()
         self.changed()
@@ -215,16 +218,17 @@ class TranscriptApp(rumps.App):
         self.window.show()
 
     def pick_file(self, sender, _arg=None):
-        path = ask_for_file()
-        if not path:
+        chosen = ask_for_files()
+        if not chosen:
             return
-        # Queued, not refused, if the worker is busy — and if this meeting has
-        # been summarised before, its notes open instead of being made again.
-        decision = self.app.submit(path)
-        if decision.error:
-            notify("Could not read that file", decision.error)
-        elif decision.notes and not decision.queued:
-            self.window.show(decision.meeting)
+        # Queued, not refused, if the worker is busy — and if one meeting was
+        # picked and it has been summarised before, its notes open instead.
+        results = self.app.import_files(chosen)["results"]
+        failed = [r for r in results if r["outcome"] == "error"]
+        if failed:
+            notify("Could not read " + ", ".join(r["name"] for r in failed), failed[0]["note"])
+        elif len(results) == 1 and results[0]["notes"]:
+            self.window.show(results[0]["meeting"])
 
     def toggle_watching(self, sender, _arg=None):
         self.app.set_watching(not self.app.watching)

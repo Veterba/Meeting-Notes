@@ -106,7 +106,11 @@ nav button {
 nav button:hover { color: var(--cloud); background: var(--hover); }
 nav button.on { color: var(--cloud); background: rgba(236, 233, 220, 0.1); }
 .count { color: var(--haze-2); }
-.rail > .primary { width: 100%; }
+.rail > .pick { display: flex; flex-direction: column; align-items: center; gap: var(--s1); }
+.rail > .pick .primary { width: 100%; }
+.rail > .pick .link { padding: 0; height: auto; border: 0; background: none; color: var(--haze-2);
+  font-size: 12px; text-decoration: underline; }
+.rail > .pick .link:hover { color: var(--cloud); }
 .record button { width: 100%; }
 .record.on button { border-color: rgba(243, 169, 169, 0.55); color: var(--bad); }
 .record .clock { color: var(--cloud); margin-left: var(--s1); }
@@ -309,6 +313,8 @@ blockquote { margin: var(--s1) 0 0; padding-left: var(--s3); border-left: 2px so
   padding: var(--s3) var(--s4); font: 12px var(--mono); cursor: pointer; animation: rise .2s ease-out; }
 .toast.ok { border-color: rgba(169, 216, 182, 0.5); }
 .toast.bad { border-color: rgba(243, 169, 169, 0.55); }
+.toast .why { margin-top: var(--s1); color: var(--haze); overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; }
 @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
 
 ::-webkit-scrollbar { width: 10px; }

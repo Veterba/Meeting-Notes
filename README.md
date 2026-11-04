@@ -1,6 +1,7 @@
 # Meeting Notes
 
-A Teams transcript becomes a set of meeting notes and an email draft, entirely on
+A meeting transcript (Teams, Zoom, Google Meet, Otter, subtitles or plain text)
+becomes a set of meeting notes and an email draft, entirely on
 your Mac. The model is Ollama running locally — no cloud API, no Microsoft Graph,
 no data leaving the machine. It is a full local app — a window with every
 meeting, its notes and the settings — plus a menu bar widget: drop a transcript
@@ -161,7 +162,7 @@ menubar.py   the app: Dock, menu bar item, window, the owner of everything
  ├ window.py  an NSWindow with a WKWebView pointed at that API
  └ ui/        the window's page — React, built with Vite into ui/dist
 pipeline.py  decide, summarise, queue watcher.py  stable files in one folder
-main.py      start-up and the CLI     parser.py  .vtt/.docx into speaker turns
+main.py      start-up and the CLI     parser.py  transcripts into speaker turns
 llm.py       Ollama, map-reduce       mailer.py  Jinja2, Outlook, SMTP
 history.py   what it has seen         menu.py    the dropdown, as data
 paths.py     folders, settings and their defaults
@@ -177,7 +178,8 @@ chosen in a dialog the server opens itself. Settings go through the same
 
 ## The window
 
-The main window is the app: a sidebar (meetings, settings, *process a file…*,
+The main window is the app: a sidebar (meetings, settings, *process files…* or
+*a whole folder…*,
 and the status — Ollama, model, watched folder, the job with a text progress
 bar), the meeting list with search and status filters, and the selected
 meeting's notes, editable, with *save* and *send*. Settings has the folder and
@@ -263,7 +265,7 @@ Recent meetings ▸  ✓ Sprint review — 23 Sep
                    ● Payment gateway — 22 Sep
                    ✕ standup.vtt — 21 Sep
                         ▸ Open notes… / Reprocess / Show transcript in Finder
-Process a file…
+Process files…
 ✓ Watch the folder
 ────────────────────────────────────
 Settings ▸  Folder… / Model ▸ / Mail ▸ / Mail account… / Default recipients…
@@ -277,9 +279,9 @@ Quit
 - **Recent meetings** is the last seven rows of `history.db`, newest first, with
   the status as a mark: `·` waiting, `…` working, `●` ready, `✓` sent, `✕` failed.
   A meeting that failed shows why, and offers *Reprocess* instead of notes;
-- **Process a file…** picks a transcript by hand. It skips the is-it-a-transcript
-  check, because you chose it, and joins the same queue as anything the watcher
-  finds, so it waits its turn rather than being refused. A meeting that has been
+- **Process files…** picks one transcript or several by hand. It skips the
+  is-it-a-transcript check, because you chose them, and joins the same queue as
+  anything the watcher finds, so it waits its turn rather than being refused. A meeting that has been
   summarised before opens its notes instead of being summarised again, and one
   that failed or was skipped is summarised now;
 - **Watch the folder** is the on/off switch. Off, the icon turns into the same
@@ -335,7 +337,9 @@ subtitles for a film — and most `.docx` files are just documents. Before any
 model time is spent, `parser.looks_like_transcript()` checks three things:
 
 A speech-to-text export with no speakers at all (`[start - end] text`) is
-recognised by its shape and only has to be long enough. Anything else:
+recognised by its shape and only has to be long enough. Subtitles (`.vtt`, `.srt`)
+that name nobody are turned down: they are as likely a film as a call. Anything
+else:
 
 1. *Somebody is speaking.* Subtitles carry no speaker tags and a document has no
    speaker headings, so both collapse into a single `Unknown` turn.
@@ -352,16 +356,25 @@ It belongs to someone else. The reason goes to `logs/pipeline.log`, and
 
 Thresholds: `MIN_TURNS`, `MIN_CHARS`, `MIN_TURNS_PER_SPEAKER`, `MIN_NAME_RATIO`,
 read from `.env` each time the check runs.
-Picking a file by hand — in the editor or via **Process a file…** — skips the
-check entirely, because the choice was explicit.
+Picking a file by hand — **Process files…**, or dropping it on the window —
+skips the check entirely, because the choice was explicit. The files in a folder
+you bring in (*or a whole folder…*, or a folder dropped on the window) are checked
+like the watcher's, but none is too old. The window then says, file by file, what
+was queued, what was already there and what was not taken and why.
+
+The files the check turned down are counted in Settings → *inbox*. **Check again**
+reads them once more with the current parser, for after the parser has learned a
+new format.
 
 ## How it works
 
-1. **Parsing** (`parser.py`) — the file's shape is decided first: Teams `.vtt`
-   (current or old timecodes), current Teams `.docx` (a header, then
-   `Name   0:03` headings), old Teams `.docx` (timecode, name and text in one
-   paragraph), a speech-to-text export with no speakers, or plain `Name: text`
-   lines. Timecodes, cue identifiers and headers are stripped; consecutive turns
+1. **Parsing** (`parser.py`) — `.vtt`, `.srt`, `.docx`, `.txt` and `.md`. The
+   file's shape is decided first. Subtitles: Teams voice tags (current or old
+   timecodes), `Name: text` cues (Zoom), or nobody named. Lines: `Name   0:03`
+   headings (current Teams `.docx`, Otter, Zoom's `[Name] 10:15:32`), old Teams
+   `.docx` (timecode, name and text in one paragraph), a speech-to-text export
+   with no speakers, or `Name: text` lines with or without a time by the name
+   (Google Meet, Markdown with `**Name:**`). Timecodes, cue identifiers and headers are stripped; consecutive turns
    by the same speaker are joined into `Speaker: text`. With no speakers, the
    model is told so and only names spoken in the text become owners. The model understands "Maria said this, whole"
    far better than twenty fragments, and it costs fewer tokens.
@@ -437,7 +450,7 @@ is `skipped`, which is only there so the watcher stops reconsidering it.
 **Transcripts are never moved, renamed or rewritten.** The app reads them where
 they are and the history remembers them, so your Downloads folder is left exactly
 as it was. A meeting that failed can be tried again with **Reprocess** in the menu, or by
-picking its file with **Process a file…**; `--once --force` summarises a known
+picking its file with **Process files…**; `--once --force` summarises a known
 meeting afresh.
 
 If Ollama is not running when a job comes up, the job **waits** for it instead of
@@ -451,12 +464,16 @@ The queue holds a meeting once, however many files it arrived in.
 .venv/bin/python -m pytest -q
 ```
 
-`tests/test_parser.py` has eleven fixtures that must be accepted: classic Teams
+`tests/test_parser.py` has 22 fixtures that must be accepted: classic Teams
 VTT with GUID cue identifiers, VTT without the closing `</v>`, VTT with an
 `X-TIMESTAMP-MAP` and `NOTE` header, a turn split across consecutive cues, a
 guest suffix, flat `Name: text`, `.docx` with tab and with space separators, old
-Teams VTT, old Teams `.docx`, and a current Teams `.docx` with its header. Four
-must be rejected: film subtitles, a report, a meeting agenda and plain prose.
+Teams VTT, old Teams `.docx`, and a current Teams `.docx` with its header. Then
+the other apps' shapes, reconstructed rather than taken from real exports: Zoom
+`.srt` and `.txt`, Otter, Google Meet as `.docx` and `.txt`, a time before or after
+the name, `Name - 0:03`, Markdown, UTF-16 and a `.txt` holding a `.vtt`. Six must
+be rejected: film subtitles as `.vtt` and `.srt`, a report, a meeting agenda as
+`.docx` and `.md`, and plain prose.
 More tests cover a speech-to-text export and what counts as a name. Beside it,
 `test_jobs.py` covers the queue and the watcher, `test_history.py` the
 fingerprint and the history flow, `test_server.py` the window's API, and
@@ -478,7 +495,7 @@ In `~/Library/Application Support/Meeting Notes/`:
 | Symptom | Cause |
 |---|---|
 | `no dialogue lines could be extracted` | format not recognised — look at the first lines and add a rule to `parser.py` |
-| ignored, "nobody speaks twice" | the file is a document, not a transcript; use **Process a file…** to force it |
+| ignored, "nobody speaks twice" | the file is a document, not a transcript; use **Process files…** to force it |
 | `model returned no valid JSON after 2 attempts` | model too small or chunk too large — raise the model or lower `CHUNK_TOKENS` |
 | a meeting sits at `waiting for Ollama` | Ollama is not running — the job starts by itself once it is |
 | notes only cover the start of the meeting | `NUM_CTX` too low |

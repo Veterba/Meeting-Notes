@@ -1,8 +1,10 @@
-"""Checks for the shapes Teams actually hands out a transcript in.
+"""Checks for the shapes Teams, Zoom, Google Meet, Otter and others hand out a
+transcript in.
 
 Run: .venv/bin/python -m pytest -q
 
-The fixtures reconstruct real Teams exports (Recap tab -> Download). Transcript
+The fixtures reconstruct real exports (Teams: Recap tab -> Download); the
+other apps' shapes are reconstructions too, not files those apps wrote. Transcript
 text stays Russian on purpose: that is the language these meetings are in, and
 the parser has to survive it. One dialogue is rendered into every dialect, so
 the dialects are compared against the same expected result.
@@ -69,6 +71,20 @@ def build_docx(tmp, name, paragraphs) -> Path:
     return p
 
 
+def build_text(tmp, name, lines, ext=".txt", encoding="utf-8") -> Path:
+    p = tmp / f"{name}{ext}"
+    p.write_text("\n".join(lines) + "\n", encoding=encoding)
+    return p
+
+
+def build_srt(tmp, name, texts) -> Path:
+    blocks = [f"{i + 1}\n00:00:{i * 6:02d},000 --> 00:00:{i * 6 + 5:02d},000\n{t}\n"
+              for i, t in enumerate(texts)]
+    p = tmp / f"{name}.srt"
+    p.write_text("\n".join(blocks), encoding="utf-8")
+    return p
+
+
 # ---------------------------------------------------------------- accepted
 
 # One long turn split across several consecutive cues has to be rejoined.
@@ -96,6 +112,23 @@ DOCX_CURRENT = (
 OLD_SPEAKERS = {A: "Speaker 1", B: "Speaker 2"}
 DOCX_OLD = [f"{old_timecode(i)}\n{OLD_SPEAKERS[s]}\n{t}" for i, (s, t) in enumerate(DIALOGUE)]
 OLD = [(OLD_SPEAKERS[s], t) for s, t in DIALOGUE]
+
+# Otter: "Name  0:03", the text below, a blank line.
+OTTER = sum([[f"{s}  0:{i * 7:02d}", t, ""] for i, (s, t) in enumerate(DIALOGUE)],
+            ["Совещание по проекту", "Tue, Sep 23, 2026 10:02AM • 12:44", ""])
+# Zoom's saved transcript: "[Name] 10:15:32", the text below.
+ZOOM_TXT = sum([[f"[{s}] 10:15:{i * 7:02d}", t] for i, (s, t) in enumerate(DIALOGUE)], [])
+# Google Meet's transcript document: a header, a bare time every few minutes, the
+# end of the meeting.
+MEET = (["Совещание по проекту - Transcript", "Attendees", f"{A}, {B}", "Transcript",
+         "00:00:00"]
+        + [f"{s}: {t}" for s, t in DIALOGUE[:4]] + ["00:05:00"]
+        + [f"{s}: {t}" for s, t in DIALOGUE[4:]] + ["Meeting ended after 00:07:12 👋"])
+STAMPED_FRONT = [f"[00:0{i}:{i * 7:02d}] {s}: {t}" for i, (s, t) in enumerate(DIALOGUE)]
+STAMPED_AFTER = [f"{s} (00:0{i}:{i * 7:02d}): {t}" for i, (s, t) in enumerate(DIALOGUE)]
+DASHED = sum([[f"{s} - 0{i}:{i * 7:02d}", t] for i, (s, t) in enumerate(DIALOGUE)], [])
+# Markdown, as Granola or a notes app copies it out.
+MARKDOWN = ["# Совещание по проекту", ""] + [f"**{s}:** {t}" for s, t in DIALOGUE]
 
 ACCEPTED = [
     pytest.param(
@@ -137,6 +170,41 @@ ACCEPTED = [
         lambda d: build_docx(d, "current", DOCX_CURRENT), [A, B],
         ["План на сегодня: закрыть релиз", "Созвонимся завтра в 10:30"],
         id="docx-current-teams-header-and-colons"),
+    pytest.param(
+        lambda d: build_srt(d, "zoom", [f"{s}: {t}" for s, t in DIALOGUE]), [A, B],
+        ["Коллеги, начнём."], id="srt-name-colon-text"),
+    pytest.param(
+        lambda d: build_text(d, "otter", OTTER), [A, B], ["Коллеги, начнём."],
+        id="txt-otter-name-and-time"),
+    pytest.param(
+        lambda d: build_text(d, "zoom", ZOOM_TXT), [A, B], ["Коллеги, начнём."],
+        id="txt-zoom-bracketed-name"),
+    pytest.param(
+        lambda d: build_docx(d, "meet", MEET), [A, B],
+        ["Коллеги, начнём.", "юристы ответят по договору"], id="docx-google-meet"),
+    pytest.param(
+        lambda d: build_text(d, "meet", MEET), [A, B], ["Коллеги, начнём."],
+        id="txt-google-meet"),
+    pytest.param(
+        lambda d: build_text(d, "front", STAMPED_FRONT), [A, B], ["Коллеги, начнём."],
+        id="txt-time-before-the-name"),
+    pytest.param(
+        lambda d: build_text(d, "after", STAMPED_AFTER), [A, B], ["Коллеги, начнём."],
+        id="txt-time-after-the-name"),
+    pytest.param(
+        lambda d: build_docx(d, "dashed", DASHED), [A, B], ["Коллеги, начнём."],
+        id="docx-name-dash-time"),
+    pytest.param(
+        lambda d: build_text(d, "granola", MARKDOWN, ".md"), [A, B], ["Коллеги, начнём."],
+        id="md-bold-names"),
+    pytest.param(
+        lambda d: build_text(d, "windows", [f"{s}: {t}" for s, t in DIALOGUE],
+                             encoding="utf-16"), [A, B], ["Коллеги, начнём."],
+        id="txt-utf16-from-windows"),
+    pytest.param(
+        lambda d: build_text(d, "vtt-as-txt", build_vtt(d, "v", DIALOGUE).read_text()
+                             .splitlines()), [A, B], ["Коллеги, начнём."],
+        id="txt-holding-a-vtt"),
 ]
 
 
@@ -150,7 +218,7 @@ def test_accepted(tmp_path, build, want_speakers, want_fragments):
     assert tparser.speakers(turns) == want_speakers
     for frag in want_fragments:
         assert frag in text, f"lost fragment {frag!r}"
-    for junk in JUNK:
+    for junk in JUNK + ("Meeting ended", "Attendees", "**"):
         assert junk not in text, f"junk leaked into the text: {junk!r}"
     ok, reason = tparser.looks_like_transcript(parsed)
     assert ok, f"rejected as not a transcript: {reason}"
@@ -200,6 +268,10 @@ PROSE = [
 REJECTED = [
     pytest.param(lambda d: build_vtt(d, "movie", MOVIE, "flat"), "no speaker names",
                  id="subtitles-feature-film"),
+    pytest.param(lambda d: build_srt(d, "movie", [t for _, t in MOVIE]), "no speaker names",
+                 id="srt-feature-film"),
+    pytest.param(lambda d: build_text(d, "agenda", AGENDA, ".md"), "nobody speaks twice",
+                 id="md-meeting-agenda"),
     pytest.param(lambda d: build_docx(d, "report", REPORT), "nobody speaks twice",
                  id="docx-ordinary-document"),
     pytest.param(lambda d: build_docx(d, "agenda", AGENDA), "nobody speaks twice",
@@ -237,6 +309,40 @@ def test_a_speech_to_text_export_is_one_turn_per_segment_and_names_nobody(tmp_pa
     assert tparser.looks_like_transcript(parsed) == (True, "")
     # The model reads the words alone, not "Unknown: …" on every line.
     assert tparser.to_text(parsed.turns).splitlines()[0] == DIALOGUE[0][1]
+
+
+def test_subtitles_without_names_are_one_turn_per_cue(tmp_path):
+    parsed = tparser.parse(build_srt(tmp_path, "whisper", [t for _, t in DIALOGUE]))
+
+    assert (parsed.named, parsed.shape) == (False, "subtitles")
+    assert [t for _, t in parsed.turns] == [t for _, t in DIALOGUE]
+    # Nobody chose it, so it could be a film: the watcher leaves it alone.
+    assert not tparser.looks_like_transcript(parsed)[0]
+
+
+def test_a_whisper_text_export_is_read_as_segments(tmp_path):
+    lines = [f"[00:{i * 7:02d}.000 --> 00:{i * 7 + 6:02d}.000]  {t}"
+             for i, (_, t) in enumerate(DIALOGUE)]
+    parsed = tparser.parse(build_text(tmp_path, "whisper", lines))
+
+    assert (parsed.named, parsed.shape) == (False, "segments")
+    assert [t for _, t in parsed.turns] == [t for _, t in DIALOGUE]
+
+
+def test_the_same_meeting_from_another_app_is_the_same_meeting(tmp_path):
+    from history import fingerprint
+    shapes = [build_vtt(tmp_path, "teams", DIALOGUE), build_text(tmp_path, "meet", MEET),
+              build_text(tmp_path, "otter", OTTER), build_text(tmp_path, "md", MARKDOWN, ".md")]
+    assert len({fingerprint(tparser.parse(p).turns) for p in shapes}) == 1
+
+
+def test_files_in_a_folder_leave_out_hidden_lock_and_other_files(tmp_path):
+    for name in ["a.vtt", "sub/b.docx", "sub/c.SRT", "d.md", "notes.pdf", ".e.txt",
+                 "~$f.docx", ".hidden/g.vtt"]:
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text("x")
+    found = [str(p.relative_to(tmp_path)) for p in tparser.files_in(tmp_path)]
+    assert found == ["a.vtt", "d.md", "sub/b.docx", "sub/c.SRT"]
 
 
 def test_the_current_docx_header_never_becomes_a_speaker(tmp_path):
