@@ -27,6 +27,9 @@ FAKE = textwrap.dedent('''\
         for _ in range(6):
             say(event="level", system=0.5, mic=0.0, system_frames=16000, mic_frames=16000)
     say(event="level", system=0.5, mic=0.25)
+    if "{mode}" == "teams" and len(sys.argv) == 3:      # given the speaking pattern
+        say(event="speaking", t=0.4, labels=["Anna, speaking"])
+        say(event="speaking", t=1.2, labels=[])
     for _ in sys.stdin:
         pass
     open(folder + "/system.wav", "wb").close()
@@ -68,6 +71,21 @@ def test_a_recording_is_a_folder_with_both_streams_and_their_timing(helper):
     meta = json.loads((folder / "meta.json").read_text())
     assert meta["system"]["rate"] == 48000 and meta["mic"]["rate"] == 44100
     assert folder.parent == paths.recordings()
+
+
+def test_who_teams_showed_speaking_is_kept_with_the_recording(helper):
+    helper("teams")
+    events = []
+    rec = Recorder()
+    rec.on_event = lambda kind, folder, message: events.append(kind)
+
+    folder = rec.start()
+    assert wait_until(lambda: rec.snapshot()["mic"] == 0.25)
+    rec.stop()
+
+    assert wait_until(lambda: events == ["started", "transcribed"])
+    assert json.loads((folder / "speaking.json").read_text()) == [
+        [0.4, ["Anna, speaking"]], [1.2, []], [1.5, []]]
 
 
 def test_a_refused_permission_is_reported_not_swallowed(helper):

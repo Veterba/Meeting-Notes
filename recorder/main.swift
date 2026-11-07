@@ -1,6 +1,6 @@
 // mn-recorder: records a call to two files, the Mac's own audio and the microphone.
 //
-//   mn-recorder <folder>
+//   mn-recorder <folder> [<speaking pattern>]
 //
 // System audio comes from a Core Audio process tap (macOS 14.2+), read through a
 // private aggregate device; the microphone through AVAudioEngine. Each goes to its
@@ -17,6 +17,14 @@
 //   {"event":"error","what":"...","status":-1}
 //   {"event":"stopped","seconds":63.2}
 //
+// With a pattern, it also reads the call app's window every half second (Teams,
+// through the accessibility API, the way a screen reader does) and says which of
+// its labels match — the ones that tell who is talking — whenever that changes;
+// t is seconds since "started". Without the Accessibility permission it says so
+// once and reads nothing.
+//   {"event":"speaking","t":12.5,"labels":["Anna Petrova, speaking"]}
+//   {"event":"speaking","t":0,"labels":[],"unavailable":"no accessibility permission"}
+//
 //   mn-recorder --watch
 //
 // Records nothing: says which apps have the microphone open, by bundle id,
@@ -30,6 +38,8 @@
 // Built by build.sh into the app bundle, next to the app's own executable, so
 // the permission prompts name Meeting Notes and not whatever started it.
 
+import AppKit
+import ApplicationServices
 import AVFoundation
 import CoreAudio
 import Foundation
@@ -317,10 +327,69 @@ func watch() -> Never {
     dispatchMain()
 }
 
+// ------------------------------------------------------------------ who is speaking
+
+let CALL_APPS = ["com.microsoft.teams2", "com.microsoft.teams"]
+let LARGEST_TREE = 20000        // elements read per look, so a huge window cannot stall it
+
+func axAttribute(_ element: AXUIElement, _ name: String) -> AnyObject? {
+    var value: AnyObject?
+    return AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success ? value : nil
+}
+
+func collectLabels(_ element: AXUIElement, _ pattern: NSRegularExpression,
+                   _ found: inout Set<String>, _ budget: inout Int) {
+    budget -= 1
+    if budget < 0 { return }
+    for name in ["AXTitle", "AXDescription", "AXValue"] {
+        if let label = axAttribute(element, name) as? String, !label.isEmpty, label.count < 200,
+           pattern.firstMatch(in: label, range: NSRange(label.startIndex..., in: label)) != nil {
+            found.insert(label)
+        }
+    }
+    for child in (axAttribute(element, "AXChildren") as? [AXUIElement]) ?? [] {
+        collectLabels(child, pattern, &found, &budget)
+    }
+}
+
+func watchSpeakers(_ pattern: NSRegularExpression, since began: Date) {
+    Thread {
+        let prompt = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        guard AXIsProcessTrustedWithOptions(prompt) else {
+            say(["event": "speaking", "t": 0, "labels": [String](),
+                 "unavailable": "no accessibility permission"])
+            return
+        }
+        var last = Set<String>(), opened: pid_t = 0
+        while true {
+            var found = Set<String>()
+            if let app = CALL_APPS.lazy.compactMap({
+                NSRunningApplication.runningApplications(withBundleIdentifier: $0).first }).first {
+                let root = AXUIElementCreateApplication(app.processIdentifier)
+                if opened != app.processIdentifier {
+                    // A web view keeps its content from accessibility until a client asks.
+                    AXUIElementSetAttributeValue(root, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                    opened = app.processIdentifier
+                }
+                var budget = LARGEST_TREE
+                for window in (axAttribute(root, "AXWindows") as? [AXUIElement]) ?? [] {
+                    collectLabels(window, pattern, &found, &budget)
+                }
+            }
+            if found != last {
+                say(["event": "speaking", "t": Date().timeIntervalSince(began),
+                     "labels": found.sorted()])
+                last = found
+            }
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }.start()
+}
+
 // ------------------------------------------------------------------ run
 
-guard CommandLine.arguments.count == 2 else {
-    FileHandle.standardError.write("usage: mn-recorder <folder> | --watch\n".data(using: .utf8)!)
+guard (2...3).contains(CommandLine.arguments.count) else {
+    FileHandle.standardError.write("usage: mn-recorder <folder> [<speaking pattern>] | --watch\n".data(using: .utf8)!)
     exit(2)
 }
 if CommandLine.arguments[1] == "--watch" { watch() }
@@ -345,6 +414,12 @@ func describe(_ format: AVAudioFormat) -> [String: Any] {
 }
 say(["event": "started", "system": describe(system.format), "mic": describe(mic.format),
      "at": began.timeIntervalSince1970])
+if CommandLine.arguments.count == 3 {
+    guard let pattern = try? NSRegularExpression(pattern: CommandLine.arguments[2]) else {
+        fail("the speaking pattern is not a valid regular expression")
+    }
+    watchSpeakers(pattern, since: began)
+}
 
 var finished = false
 func finish() {

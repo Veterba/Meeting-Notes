@@ -6,15 +6,21 @@ segmentation model finds the turns, a speaker-embedding model groups them by
 voice), and each of their lines is relabelled Speaker 1, Speaker 2… by which
 voice was speaking when it was said. One voice stays "Them".
 
+When the call is in Teams, the recorder also notes whose name Teams marks as
+speaking (speaking.json in the recording's folder). Those names replace the
+labels: a line gets the name shown while it was said, or else the one its voice
+had most often. A name shown mostly while I talk is mine, and is left out.
+
 The names come later, from the user: renaming "Speaker 1" to "Anna" rewrites the
 meeting's notes in place and is remembered for its transcript, so the model
 never has to run again for it.
 """
+import json
 import logging
 import re
 import tarfile
 from array import array
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import replace
 from pathlib import Path
 
@@ -35,6 +41,11 @@ THRESHOLD = 0.7
 # Seconds. A voice that says less than this in the whole call is a stray piece of
 # someone else's (a cough, a word through bad audio), not another person.
 SHORTEST_VOICE = 10
+# What Teams' window says beside the person talking, as the accessibility API reads
+# it. The recorder picks labels with it, so it must suit both Python and ICU:
+# group 1 is the name.
+SPEAKING = r"(?i)^(.+?)[,;:]?\s+(?:is\s+)?(?:speaking|talking|говорит|snakker)\b"
+SPEAKING_FILE = "speaking.json"
 NAMES = "_speakers"             # in a meeting's notes: {"Speaker 1": "Anna", ...}
 
 
@@ -114,17 +125,70 @@ def assign(lines: list, turns: list) -> list:
     return out
 
 
+def timeline(folder: Path) -> list:
+    """[(name, start s, end s)]: when the call app showed each name as speaking."""
+    path = Path(folder) / SPEAKING_FILE
+    if not path.exists():
+        return []
+    pattern = re.compile(SPEAKING)
+    spans, since, t = [], {}, 0.0
+    for t, labels in json.loads(path.read_text(encoding="utf-8")):
+        now = {m[1].strip() for label in labels if (m := pattern.search(label))}
+        for name in now - since.keys():
+            since[name] = t
+        for name in since.keys() - now:
+            spans.append((name, since.pop(name), t))
+    spans += [(name, start, t) for name, start in since.items()]
+    return sorted(spans, key=lambda span: span[1])
+
+
+def put_names(lines: list, spans: list) -> list:
+    """Their lines named by the call app: the name shown most while a line was
+    said, or else the one shown most while its voice spoke."""
+    if not spans:
+        return lines
+    shown = defaultdict(Counter)            # a line -> name -> seconds shown during it
+    mine, theirs = Counter(), Counter()
+    for i, line in enumerate(lines):
+        for name, start, end in spans:
+            overlap = min(end, line.end) - max(start, line.start)
+            if overlap > 0:
+                shown[i][name] += overlap
+                (mine if line.who == "me" else theirs)[name] += overlap
+    # Teams marks me speaking too; a name heard mostly over my lines is mine.
+    own = {name for name in mine if mine[name] >= theirs[name]}
+    voice = defaultdict(Counter)
+    for i, line in enumerate(lines):
+        if line.who != "me":
+            voice[line.who].update(shown[i])
+
+    def best(counts):
+        counts = {name: s for name, s in counts.items() if name not in own}
+        return max(counts, key=counts.get) if counts else None
+
+    out = []
+    for i, line in enumerate(lines):
+        name = None if line.who == "me" else best(shown[i]) or best(voice[line.who])
+        out.append(replace(line, who=name) if name else line)
+    return out
+
+
 def relabel(lines: list, folder: Path, status=lambda text: None) -> list:
-    """Live's last step: their lines by voice. On any failure the lines stay as
-    they were — a call with one "Them" is still worth its notes."""
+    """Live's last step: their lines by voice, then by the names the call app
+    showed. On any failure the lines stay as they were — a call with one "Them"
+    is still worth its notes."""
     if not any(line.who == "them" for line in lines):
         return lines
     try:
         ensure_models(status)
         status("telling the speakers apart")
-        return assign(lines, diarize(Path(folder) / "system.wav"))
+        lines = assign(lines, diarize(Path(folder) / "system.wav"))
     except Exception as e:
         log.error("Could not tell the speakers apart in %s: %s", Path(folder).name, e)
+    try:
+        return put_names(lines, timeline(folder))
+    except Exception as e:
+        log.error("Could not read who was speaking in %s: %s", Path(folder).name, e)
         return lines
 
 

@@ -1,5 +1,8 @@
 """Telling the other side's voices apart, and naming them. The voices here are
 given as turns; sherpa-onnx itself is only run by hand on real audio."""
+import json
+import re
+
 import llm
 import parser as tparser
 import speakers
@@ -101,3 +104,75 @@ def test_the_model_is_told_who_the_voices_are(monkeypatch):
                         lambda prompt, schema, model: prompts.append(prompt) or {"title": "t"})
     llm.summarize([("Me", "hi"), ("Speaker 1", "hello Me")], {"source": "Call.vtt"}, model="m")
     assert '"Speaker N" and "Them" are the other people' in prompts[0]
+
+
+# ---------------------------------------------------------------- names from Teams
+
+def said(tmp_path, events):
+    (tmp_path / speakers.SPEAKING_FILE).write_text(json.dumps(events))
+    return tmp_path
+
+
+def test_the_speaking_labels_teams_might_show():
+    pattern = re.compile(speakers.SPEAKING)
+    assert pattern.search("Anna Petrova, speaking")[1] == "Anna Petrova"
+    assert pattern.search("Anna is speaking")[1] == "Anna"
+    assert pattern.search("Анна говорит")[1] == "Анна"
+    assert not pattern.search("Speaking time")
+    assert not pattern.search("Anna Petrova, muted")
+
+
+def test_the_timeline_is_when_each_name_was_shown_speaking(tmp_path):
+    folder = said(tmp_path, [[1.0, ["Anna, speaking"]],
+                             [4.0, ["Anna, speaking", "Me Myself, speaking", "Mute"]],
+                             [5.0, ["Me Myself, speaking"]],
+                             [9.0, []],
+                             [12.0, ["Anna, speaking"]],
+                             [15.5, []]])
+    assert speakers.timeline(folder) == [("Anna", 1.0, 5.0), ("Me Myself", 4.0, 9.0),
+                                         ("Anna", 12.0, 15.5)]
+
+
+def test_no_speaking_file_is_no_timeline(tmp_path):
+    assert speakers.timeline(tmp_path) == []
+
+
+def test_each_line_gets_the_name_shown_while_it_was_said():
+    """Two people that the voices could not tell apart."""
+    lines = [them(0, 10), them(11, 20), Line("me", 21, 25, "ok"), them(26, 30)]
+    spans = [("Anna", 0.5, 10), ("Philip", 11, 20), ("Me Myself", 21, 25),
+             ("Anna", 26, 29)]
+
+    assert [line.who for line in speakers.put_names(lines, spans)] == [
+        "Anna", "Philip", "me", "Anna"]
+
+
+def test_a_line_teams_missed_takes_its_voice_s_name():
+    lines = [Line("Speaker 1", 0, 10, "..."), Line("Speaker 2", 11, 20, "..."),
+             Line("Speaker 1", 30, 35, "...")]
+    spans = [("Anna", 0, 10), ("Philip", 11, 20)]
+
+    assert [line.who for line in speakers.put_names(lines, spans)] == [
+        "Anna", "Philip", "Anna"]
+
+
+def test_my_own_name_never_goes_to_their_lines():
+    """Teams marks me speaking too, and its marks lag behind the voice."""
+    lines = [Line("me", 0, 10, "..."), them(9, 20), Line("me", 21, 30, "...")]
+    spans = [("Yaroslav", 0, 10.5), ("Philip", 10.5, 20), ("Yaroslav", 21, 30)]
+
+    assert [line.who for line in speakers.put_names(lines, spans)] == [
+        "me", "Philip", "me"]
+
+
+def test_names_come_even_when_the_voices_could_not_be_told_apart(tmp_path, monkeypatch):
+    def broken(status):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(speakers, "ensure_models", broken)
+    folder = said(tmp_path, [[0.0, ["Philip, speaking"]], [10.0, []]])
+
+    out = speakers.relabel([them(1, 9)], folder)
+
+    assert [line.who for line in out] == ["Philip"]
+    assert "<v Philip>" in to_vtt(out)

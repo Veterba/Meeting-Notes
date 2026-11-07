@@ -27,7 +27,7 @@ npm run build --prefix ui >/dev/null
 say "Building the recorder (Swift)"
 mkdir -p build
 swiftc -O -o build/mn-recorder recorder/main.swift \
-  -framework CoreAudio -framework AVFoundation 2>build/swiftc.log \
+  -framework CoreAudio -framework AVFoundation -framework AppKit -framework ApplicationServices 2>build/swiftc.log \
   || { echo "The recorder did not compile:"; cat build/swiftc.log; exit 1; }
 
 say "Drawing the icons"

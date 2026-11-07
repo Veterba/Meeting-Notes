@@ -42,7 +42,7 @@ if [ ! -x build/mn-recorder ] || [ recorder/main.swift -nt build/mn-recorder ]; 
   command -v swiftc >/dev/null || die "swiftc not found. Install the tools: xcode-select --install"
   say "Building the recorder"
   mkdir -p build
-  swiftc -O -o build/mn-recorder recorder/main.swift -framework CoreAudio -framework AVFoundation 2>/dev/null \
+  swiftc -O -o build/mn-recorder recorder/main.swift -framework CoreAudio -framework AVFoundation -framework AppKit -framework ApplicationServices 2>/dev/null \
     || die "The recorder did not compile: swiftc -O -o build/mn-recorder recorder/main.swift"
 fi
 

@@ -6,6 +6,14 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.11.0 — 2026-11-07
+### Added
+- Real names for the other side of a Teams call: while recording, the helper reads Teams'
+  window through the accessibility API (no screenshots) and notes who is shown speaking;
+  after the call those names replace *Speaker N*, line by line, with the voice as fallback.
+- The *Accessibility* permission is asked for on the first recording. Without it, or in
+  other call apps, speakers stay *Speaker N*. What was seen is kept as `speaking.json`.
+
 ## v0.10.2 — 2026-11-04
 ### Fixed
 - A recorded call no longer turns English into Russian or Japanese now and then: each line

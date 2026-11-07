@@ -200,7 +200,8 @@ into `recordings/<date time>/` in the data folder: `system.wav` (the others),
 and a level meter for each, so a silent stream shows up during the call.
 
 The first recording asks for two permissions, *Microphone* and *System Audio
-Recording*. With an ad-hoc signed build, macOS may ask again after a rebuild.
+Recording*, and, for the names of the people in a Teams call, *Accessibility*.
+With an ad-hoc signed build, macOS may ask again after a rebuild.
 
 **Live transcript.** While the call runs, the window's live view shows what each
 side said, a few seconds behind. The app reads both files as they grow, cuts
@@ -227,8 +228,19 @@ the call ends, their voices are told apart (speaker diarization with sherpa-onnx
 two small models, about 45 MB, downloaded the first time) and their lines become
 *Speaker 1*, *Speaker 2*… — one voice stays *Them*. A voice heard for less than
 ten seconds in the whole call is taken for a scrap of someone else's, not another
-person. If one person still comes out as two, give both the same name. Above a meeting's transcript,
-*who is who* gives each voice a name; the name replaces the label in the notes as
+person. If one person still comes out as two, give both the same name.
+
+**Names from Teams.** In a call in the Teams desktop app (not the browser), the
+recorder reads Teams' window twice a second through the accessibility API, the
+way a screen reader does, and notes whose tile says they are speaking
+(`speaking.json` in the recording's folder). After the call those names replace
+*Speaker N*: a line gets the name Teams showed while it was said, or else the
+name its voice had most often. Teams marks you speaking too; a name shown mostly
+while you talk is yours and never goes to their lines. It needs the
+*Accessibility* permission for Meeting Notes (asked on the first recording); without
+it, or in another app, you get *Speaker N* as before. No screenshots are taken.
+
+Above a meeting's transcript, *who is who* gives each voice a name; the name replaces the label in the notes as
 well, without running the model again. The model itself is told the speakers are
 unnamed and uses a name only when the conversation gives one, as an assumption.
 

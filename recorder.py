@@ -4,7 +4,8 @@ transcription (`transcriber.Live`) alongside.
 
 A recording is a folder in DATA/recordings named by when it started, holding
 system.wav (everything the Mac played: the other people), mic.wav (me),
-meta.json (formats and the start time) and, once it stops, the transcript as
+meta.json (formats and the start time), speaking.json (when Teams showed whom as
+speaking, if it could be read) and, once it stops, the transcript as
 "Call <folder>.vtt".
 """
 import json
@@ -67,7 +68,8 @@ class Recorder:
         self.folder = folder
         with self._lock:
             self._state = dict(self._idle(), recording=True, folder=str(folder))
-        self.proc = subprocess.Popen([str(helper), str(folder)], stdin=subprocess.PIPE,
+        self.proc = subprocess.Popen([str(helper), str(folder), speakers.SPEAKING],
+                                     stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                      text=True, bufsize=1)
         threading.Thread(target=self._read, args=(self.proc, folder), name="recorder",
@@ -91,7 +93,7 @@ class Recorder:
     # -------------------------------------------------- internals
 
     def _read(self, proc, folder: Path):
-        error, meta, live, dead_mic = "", {}, None, 0
+        error, meta, live, dead_mic, speaking = "", {}, None, 0, []
         for line in proc.stdout:
             try:
                 event = json.loads(line)
@@ -112,6 +114,11 @@ class Recorder:
                 dead_mic = dead_mic + 1 if mic == 0 and event.get("mic_frames") else 0
                 if dead_mic == DEAD_MIC_SECONDS:
                     self._warn(folder, "the microphone is sending pure silence")
+            elif kind == "speaking":
+                if event.get("unavailable"):
+                    log.warning("Cannot see who speaks in the call app: %s", event["unavailable"])
+                else:
+                    speaking.append([round(event.get("t", 0.0), 2), event.get("labels", [])])
             elif kind == "warning":
                 self._warn(folder, event.get("what", ""))
             elif kind == "error":
@@ -119,7 +126,11 @@ class Recorder:
                 log.error("Recorder: %s (status %s)", error, event.get("status"))
             elif kind == "stopped":
                 self._update(seconds=event.get("seconds", 0.0))
+                if speaking:
+                    speaking.append([round(event.get("seconds", 0.0), 2), []])
         proc.wait()
+        if speaking:
+            (folder / speakers.SPEAKING_FILE).write_text(json.dumps(speaking), encoding="utf-8")
         with self._lock:
             self._state.update(recording=False, transcribing=live is not None, error=error)
         log.info("Recording stopped: %s%s", folder.name, f" — {error}" if error else "")
