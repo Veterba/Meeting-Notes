@@ -14,6 +14,7 @@ import logging
 import re
 import tarfile
 from array import array
+from collections import Counter
 from dataclasses import replace
 from pathlib import Path
 
@@ -25,11 +26,15 @@ log = logging.getLogger("pipeline")
 RELEASES = "https://github.com/k2-fsa/sherpa-onnx/releases/download"
 SEGMENTATION_URL = (f"{RELEASES}/speaker-segmentation-models/"
                     "sherpa-onnx-pyannote-segmentation-3-0.tar.bz2")
-EMBEDDING_NAME = "3dspeaker_speech_campplus_sv_zh_en_16k-common_advanced.onnx"
+EMBEDDING_NAME = "nemo_en_titanet_small.onnx"
 EMBEDDING_URL = f"{RELEASES}/speaker-recongition-models/{EMBEDDING_NAME}"   # sic, their tag
-# How alike two voices must be to count as one person. Chosen on test voices
-# from the middle of the range where the result did not change (0.3–0.5).
-THRESHOLD = 0.5
+# How alike two voices must be to count as one person. On synthetic calls of one,
+# two and three voices any value from 0.3 to 0.8 told them apart; a real call's one
+# voice, through a call app's compression, only stays one from 0.7 up.
+THRESHOLD = 0.7
+# Seconds. A voice that says less than this in the whole call is a stray piece of
+# someone else's (a cough, a word through bad audio), not another person.
+SHORTEST_VOICE = 10
 NAMES = "_speakers"             # in a meeting's notes: {"Speaker 1": "Anna", ...}
 
 
@@ -46,7 +51,7 @@ def embedding_model() -> Path:
 
 
 def ensure_models(status=lambda text: None):
-    """Download the two small models (about 30 MB) the first time."""
+    """Download the two small models (about 45 MB) the first time."""
     if not segmentation_model().exists():
         status("downloading the speaker models")
         archive = models_dir() / "segmentation.tar.bz2"
@@ -79,35 +84,33 @@ def diarize(wav: Path) -> list:
 
 
 def assign(lines: list, turns: list) -> list:
-    """Their lines relabelled by the voice that overlaps each the most.
+    """Their lines relabelled by the voice that overlaps each the most, or the
+    nearest one when none does.
 
     Voices are numbered by when they first speak, so Speaker 1 opens the call.
-    A line no voice overlaps keeps the speaker before it. Mine are untouched.
+    A voice heard too little is left out, and its lines go to a real one. Mine
+    are untouched.
     """
+    talk = Counter()
+    for who, start, end in turns:
+        talk[who] += end - start
+    turns = [t for t in turns if talk[t[0]] >= SHORTEST_VOICE]
+    if not turns:
+        return lines
+
     def voice(line):
-        best, most = None, 0.0
-        for who, start, end in turns:
-            overlap = min(end, line.end) - max(start, line.start)
-            if overlap > most:
-                best, most = who, overlap
-        return best
+        # A gap counts as a negative overlap, so the nearest voice wins.
+        return max(turns, key=lambda t: min(t[2], line.end) - max(t[1], line.start))[0]
 
     voices = [voice(line) if line.who == "them" else None for line in lines]
-    heard = [v for v in voices if v is not None]
-    if len(set(heard)) < 2:
+    if len(set(voices) - {None}) < 2:
         return lines                    # one voice on their side: "Them" says it
-    number, last, out = {}, None, []
+    number, out = {}, []
     for line, v in zip(lines, voices):
-        if line.who != "them":
-            out.append(line)
-            continue
-        v = last if v is None else v
-        last = v
-        if v is None:
-            out.append(line)
-            continue
-        number.setdefault(v, len(number) + 1)
-        out.append(replace(line, who=f"Speaker {number[v]}"))
+        if v is not None:
+            number.setdefault(v, len(number) + 1)
+            line = replace(line, who=f"Speaker {number[v]}")
+        out.append(line)
     return out
 
 

@@ -292,12 +292,12 @@ class WhisperServer:
                 time.sleep(0.5)
         raise RuntimeError("the speech model did not answer")
 
-    def transcribe(self, samples: array) -> str:
+    def transcribe(self, samples: array, prompt: str = "") -> str:
         language = paths.setting("WHISPER_LANGUAGE") or "auto"
         r = requests.post(f"{self.url}/inference",
                           files={"file": ("piece.wav", wav_bytes(samples), "audio/wav")},
                           data={"response_format": "json", "language": language,
-                                "temperature": "0"},
+                                "temperature": "0", "prompt": prompt},
                           timeout=300)
         r.raise_for_status()
         # Whisper breaks lines inside a sentence now and then; a line is one line.
@@ -330,6 +330,7 @@ class Live:
     POLL = 0.5
     PARTIAL_EVERY = 0.8             # seconds of new speech before a partial is redone
     PARTIAL_SHORTEST = 1.0          # less than this is too little for Whisper to guess
+    CONTEXT_CHARS = 200             # of what a side said last, given to Whisper as a prompt
 
     def __init__(self, folder: Path, transcribe=None, relabel=None):
         self.folder = Path(folder)
@@ -448,12 +449,20 @@ class Live:
                 continue
             who, start, end, samples = piece
             try:
-                text = self._transcribe(samples)
+                text = self._transcribe(samples, self._context(who))
             except Exception as e:
                 log.error("Could not transcribe %.1f–%.1f s of %s: %s", start, end, who, e)
                 continue
             if is_speech(text):
                 self._add(Line(who, round(start, 2), round(end, 2), text))
+
+    def _context(self, who: str) -> str:
+        """What this side said last. Guessed from one line alone, an accent can
+        pass for another language; with the conversation so far, Whisper keeps
+        to the one being spoken."""
+        with self._lock:
+            said = " ".join(line.text for line in self.lines if line.who == who)
+        return said[-self.CONTEXT_CHARS:]
 
     def _partials(self):
         """Transcribe what is being said right now, for each side that has grown
@@ -469,7 +478,7 @@ class Live:
                                                        and end - done.end < self.PARTIAL_EVERY):
                 continue
             try:
-                text = self._transcribe(samples)
+                text = self._transcribe(samples, self._context(who))
             except Exception as e:
                 log.error("Could not transcribe the open %s piece: %s", who, e)
                 continue

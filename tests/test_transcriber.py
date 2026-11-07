@@ -100,7 +100,7 @@ def test_a_call_becomes_a_transcript_the_pipeline_reads(tmp_path):
     into my microphone — growing while the call goes on."""
     said = {}
 
-    def whisper(samples):
+    def whisper(samples, prompt):
         # Each burst is a different length; the length says which one it was.
         return said.get(round(len(samples) / RATE), "Thank you.")
 
@@ -129,7 +129,7 @@ def test_a_call_becomes_a_transcript_the_pipeline_reads(tmp_path):
 def test_a_silent_call_writes_nothing(tmp_path):
     start_wav(tmp_path / "system.wav")
     start_wav(tmp_path / "mic.wav")
-    live = Live(tmp_path, transcribe=lambda s: "Thank you.")
+    live = Live(tmp_path, transcribe=lambda s, p: "Thank you.")
     live.start()
     assert live.finish() is None
     assert not list(tmp_path.glob("*.vtt"))
@@ -161,7 +161,7 @@ def test_words_show_while_they_are_said_and_the_line_takes_over_at_the_pause(tmp
     start_wav(tmp_path / "system.wav")
     start_wav(tmp_path / "mic.wav")
     heard = {"text": "so we were thinking"}
-    live = Live(tmp_path, transcribe=lambda samples: heard["text"])
+    live = Live(tmp_path, transcribe=lambda samples, prompt: heard["text"])
     live.POLL = 0.05
     live.start()
 
@@ -178,3 +178,41 @@ def test_words_show_while_they_are_said_and_the_line_takes_over_at_the_pause(tmp
     assert [line["text"] for line in snap["lines"]] == ["So we were thinking about Friday."]
     assert snap["partial"] == []
     live.finish()
+
+
+def test_whisper_is_given_what_that_side_said_last(tmp_path):
+    """Guessed from one line alone, an accented English line came out as Russian."""
+    # By the length of each burst; a piece is about a second longer (the pause).
+    said = {1: "We should ship on Friday.", 2: "And tell the client today.", 3: "Fine by me."}
+    prompts = {}
+
+    def whisper(samples, prompt):
+        text = said[round(len(samples) / RATE - 1)]
+        prompts[text] = prompt
+        return text
+
+    for name, bursts in (("system.wav", (1, 2)), ("mic.wav", (3,))):
+        start_wav(tmp_path / name)
+        for seconds in bursts:
+            append(tmp_path / name, quiet(1) + tone(seconds) + quiet(1))
+    Live(tmp_path, transcribe=whisper).finish_all()
+
+    assert prompts["We should ship on Friday."] == ""
+    assert prompts["And tell the client today."] == "We should ship on Friday."
+    assert prompts["Fine by me."] == "", "the other side's words are not mine"
+
+
+def test_the_prompt_reaches_the_server(monkeypatch):
+    sent = {}
+
+    class Reply:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"text": " hello\n there "}
+
+    monkeypatch.setattr(transcriber.requests, "post",
+                        lambda url, files, data, timeout: sent.update(data) or Reply())
+    assert transcriber.WhisperServer().transcribe(tone(1), "earlier words") == "hello there"
+    assert sent["prompt"] == "earlier words"

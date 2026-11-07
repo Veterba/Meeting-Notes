@@ -46,7 +46,7 @@ def helper(tmp_path, monkeypatch):
     monkeypatch.setattr(paths, "DATA", tmp_path / "data")
     # No whisper either: the transcriber hears every piece as the same line.
     monkeypatch.setattr(Recorder, "make_live",
-                        staticmethod(lambda folder: Live(folder, transcribe=lambda s: "hello")))
+                        staticmethod(lambda folder: Live(folder, transcribe=lambda s, p: "hello")))
     install()
     return install
 

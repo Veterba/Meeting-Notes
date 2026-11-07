@@ -6,6 +6,14 @@ its commit message; open problems live in the project note, not here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow the commit
 messages: `v0.MINOR.PATCH`, MINOR for a feature or substantial change, PATCH for a fix.
 
+## v0.10.2 — 2026-11-04
+### Fixed
+- A recorded call no longer turns English into Russian or Japanese now and then: each line
+  is transcribed with what that side said just before it, so Whisper keeps to the language.
+- One person on the other side of a call is no longer split into a dozen speakers: another
+  voice model (NeMo TitaNet, downloaded once, about 40 MB), a looser threshold, and a voice
+  heard for less than ten seconds counts as a scrap of a real one, not a new person.
+
 ## v0.10.1 — 2026-11-04
 ### Changed
 - Ollama runs only while there is work: the app no longer starts it on launch; the worker

@@ -286,7 +286,7 @@ def test_the_live_lines_come_from_the_call_being_recorded(api, app, tmp_path):
     assert api("GET", "/api/live")[1]["lines"] == []
 
     from transcriber import Line, Live
-    live = app.recorder.live = Live(tmp_path, transcribe=lambda s: "")
+    live = app.recorder.live = Live(tmp_path, transcribe=lambda s, p: "")
     live._add(Line("them", 1, 2, "hello"))
     live._add(Line("me", 3, 4, "hi"))
 

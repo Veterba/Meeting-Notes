@@ -217,13 +217,17 @@ recording's folder and summarised like any downloaded transcript, so the call
 lands in the meetings list (tagged *rec*) with its notes. Every meeting has a
 *notes / transcript* switch to read what was actually said.
 
-`WHISPER_LANGUAGE` (default `auto`) can be fixed to `ru` or `en`, which is more
-reliable on short phrases.
+Each line is transcribed with what that side said just before it, so Whisper
+keeps to the language being spoken instead of guessing it from one line (an
+accent alone could make an English line come out in Russian).
+`WHISPER_LANGUAGE` (default `auto`) can still be fixed to `ru` or `en`.
 
 **Who said what.** Everyone else in a call arrives mixed in one stream. When
 the call ends, their voices are told apart (speaker diarization with sherpa-onnx;
-two small models, about 30 MB, downloaded the first time) and their lines become
-*Speaker 1*, *Speaker 2*… — one voice stays *Them*. Above a meeting's transcript,
+two small models, about 45 MB, downloaded the first time) and their lines become
+*Speaker 1*, *Speaker 2*… — one voice stays *Them*. A voice heard for less than
+ten seconds in the whole call is taken for a scrap of someone else's, not another
+person. If one person still comes out as two, give both the same name. Above a meeting's transcript,
 *who is who* gives each voice a name; the name replaces the label in the notes as
 well, without running the model again. The model itself is told the speakers are
 unnamed and uses a name only when the conversation gives one, as an assumption.
